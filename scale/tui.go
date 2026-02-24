@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type readingMsg struct {
@@ -286,6 +287,7 @@ func (m tuiModel) View() string {
 	deviceState := strings.ToUpper(safeText("-", m.zebra.DeviceState))
 	mediaState := strings.ToUpper(safeText("-", m.zebra.MediaState))
 	read1 := safeText("-", m.zebra.ReadLine1)
+	read2 := safeText("-", m.zebra.ReadLine2)
 	verify := strings.ToUpper(safeText("-", m.zebra.Verify))
 	lastEPC := safeText("-", m.zebra.LastEPC)
 	zebraUpdated := "-"
@@ -303,6 +305,7 @@ func (m tuiModel) View() string {
 		kv("LAG", lag),
 		kv("SOURCE", elideMiddle(m.sourceLine, maxInt(20, panelW-16))),
 		kv("PORT", elideMiddle(port, maxInt(20, panelW-16))),
+		kv("MESSAGE", elideMiddle(status, maxInt(20, panelW-16))),
 	}
 
 	zebraLines := []string{
@@ -313,15 +316,125 @@ func (m tuiModel) View() string {
 		kv("MEDIA ST", mediaState),
 		kv("VERIFY", verify),
 		kv("LAST EPC", elideMiddle(lastEPC, maxInt(18, panelW-16))),
-		kv("READ", elideMiddle(read1, maxInt(18, panelW-16))),
+		kv("READ 1", elideMiddle(read1, maxInt(18, panelW-16))),
+		kv("READ 2", elideMiddle(read2, maxInt(18, panelW-16))),
 		kv("UPDATED", zebraUpdated),
 		kv("ERROR", elideMiddle(zebraErr, maxInt(18, panelW-16))),
 	}
 
-	header := renderHeader(w, now, scaleState, zebraState)
-	panel := renderUnifiedPanel("GSCALE-ZEBRA MONITOR", "SCALE", scaleLines, "ZEBRA", zebraLines, panelW)
-	footer := renderFooter(w, m.info)
+	header := renderTopBar(w, now, scaleState, zebraState, m.batchActive)
+	footer := renderBottomBar(w, m.info)
+
+	panel := renderUnifiedStatusCard("GSCALE-ZEBRA MONITOR", scaleState, zebraState, scaleLines, zebraLines, panelW)
+
 	return header + "\n" + panel + "\n" + footer
+}
+
+func renderTopBar(width int, now time.Time, scaleState, zebraState string, batchActive bool) string {
+	line := fmt.Sprintf(
+		"GSCALE-ZEBRA MONITOR | %s | SCALE=%s | ZEBRA=%s | BATCH=%s",
+		now.Format("2006-01-02 15:04:05"),
+		scaleState,
+		zebraState,
+		batchGateText(batchActive),
+	)
+	line = fitLineRaw(line, width)
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#E2E8F0")).
+		Render(line)
+}
+
+func renderBottomBar(width int, info string) string {
+	left := "keys: [q] quit [e] encode+print [r] read"
+	info = strings.TrimSpace(info)
+	line := left
+	if info != "" {
+		line = left + " | " + info
+	}
+	line = fitLineRaw(line, width)
+
+	color := lipgloss.Color("#94A3B8")
+	l := strings.ToLower(info)
+	if strings.Contains(l, "xato") || strings.Contains(l, "error") || strings.Contains(l, "timeout") {
+		color = lipgloss.Color("#F59E0B")
+	} else if info != "" {
+		color = lipgloss.Color("#A7F3D0")
+	}
+
+	return lipgloss.NewStyle().Foreground(color).Render(line)
+}
+
+func renderStatusCard(title, state string, lines []string, width int) string {
+	if width < 34 {
+		width = 34
+	}
+	inner := width - 4
+	if inner < 10 {
+		inner = 10
+	}
+
+	header := fitPanelLine(strings.ToUpper(strings.TrimSpace(title))+" | "+strings.ToUpper(strings.TrimSpace(state)), inner)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E2E8F0"))
+	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1"))
+
+	rows := make([]string, 0, len(lines)+1)
+	rows = append(rows, titleStyle.Render(header))
+	for _, line := range lines {
+		rows = append(rows, lineStyle.Render(fitPanelLine(line, inner)))
+	}
+
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(panelBorderColor(state)).
+		Padding(0, 1)
+	return cardStyle.Render(strings.Join(rows, "\n"))
+}
+
+func panelBorderColor(state string) lipgloss.Color {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "UP", "ACTIVE":
+		return lipgloss.Color("#16A34A")
+	case "DOWN":
+		return lipgloss.Color("#DC2626")
+	case "DISABLED", "STOPPED":
+		return lipgloss.Color("#64748B")
+	default:
+		return lipgloss.Color("#0EA5E9")
+	}
+}
+
+func renderUnifiedStatusCard(title, scaleState, zebraState string, scaleLines, zebraLines []string, width int) string {
+	if width < 68 {
+		width = 68
+	}
+	inner := width - 4
+	if inner < 10 {
+		inner = 10
+	}
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E2E8F0"))
+	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1"))
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#93C5FD"))
+
+	rows := make([]string, 0, len(scaleLines)+len(zebraLines)+6)
+	rows = append(rows, titleStyle.Render(fitPanelLine(strings.ToUpper(strings.TrimSpace(title)), inner)))
+	rows = append(rows, sectionStyle.Render(fitPanelLine("[SCALE] "+strings.ToUpper(strings.TrimSpace(scaleState)), inner)))
+	for _, line := range scaleLines {
+		rows = append(rows, lineStyle.Render(fitPanelLine(line, inner)))
+	}
+	rows = append(rows, lineStyle.Render(strings.Repeat("─", inner)))
+	rows = append(rows, sectionStyle.Render(fitPanelLine("[ZEBRA] "+strings.ToUpper(strings.TrimSpace(zebraState)), inner)))
+	for _, line := range zebraLines {
+		rows = append(rows, lineStyle.Render(fitPanelLine(line, inner)))
+	}
+
+	// Bitta monitor panel: programma "bir butun" ko'rinsin.
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#0EA5E9")).
+		Padding(0, 1)
+	return cardStyle.Render(strings.Join(rows, "\n"))
 }
 
 func waitForReadingCmd(ctx context.Context, updates <-chan Reading) tea.Cmd {

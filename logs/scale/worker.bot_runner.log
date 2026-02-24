@@ -1,0 +1,3 @@
+[worker.bot_runner] 2026/02/23 08:11:17.885551 bot started: pid=813998 dir=/home/wikki/local.git/gscale-zebra/bot
+[worker.bot_runner] 2026/02/23 12:01:31.439221 bot stop requested: pid=813998 timeout=3s
+[worker.bot_runner] 2026/02/23 12:01:31.441414 bot stop completed with error (ignored): pid=813998 err=signal: terminated
