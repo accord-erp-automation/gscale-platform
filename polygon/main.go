@@ -54,6 +54,18 @@ type cycleFrame struct {
 	duration time.Duration
 }
 
+type printerCommand struct {
+	ID        int64  `json:"id"`
+	EPC       string `json:"epc"`
+	QtyText   string `json:"qty_text"`
+	ItemName  string `json:"item_name"`
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+	Preview   string `json:"preview"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 type simulator struct {
 	mu sync.Mutex
 
@@ -72,6 +84,8 @@ type simulator struct {
 	activePrintEPC string
 	printFinishAt  time.Time
 	alternateFail  bool
+	printerSeq     int64
+	printerHistory []printerCommand
 }
 
 func main() {
@@ -252,6 +266,7 @@ func (s *simulator) processPrintRequestLocked(now time.Time) error {
 		s.zebra.Action = "encode"
 		s.zebra.Error = ""
 		s.zebra.Verify = "PROCESSING"
+		s.startPrinterCommandLocked(req, now)
 		return s.store.Update(func(snapshot *bridgestate.Snapshot) {
 			if strings.ToUpper(strings.TrimSpace(snapshot.PrintRequest.EPC)) != reqEPC {
 				return
@@ -275,9 +290,11 @@ func (s *simulator) processPrintRequestLocked(now time.Time) error {
 	if success {
 		s.zebra.Verify = "WRITTEN"
 		s.zebra.Error = ""
+		s.finishPrinterCommandLocked(epc, "done", "", now)
 	} else {
 		s.zebra.Verify = "ERROR"
 		s.zebra.Error = "polygon forced print failure"
+		s.finishPrinterCommandLocked(epc, "error", "polygon forced print failure", now)
 	}
 
 	return s.store.Update(func(snapshot *bridgestate.Snapshot) {
@@ -324,6 +341,7 @@ func (s *simulator) routes() http.Handler {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/v1/scale", s.handleScale)
 	mux.HandleFunc("/api/v1/state", s.handleState)
+	mux.HandleFunc("/api/v1/dev/printer", s.handlePrinter)
 	mux.HandleFunc("/api/v1/dev/auto", s.handleAuto)
 	mux.HandleFunc("/api/v1/dev/weight", s.handleWeight)
 	mux.HandleFunc("/api/v1/dev/reset", s.handleReset)
@@ -382,6 +400,26 @@ func (s *simulator) handleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
 		"state": snap,
+	})
+}
+
+func (s *simulator) handlePrinter(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+
+	s.mu.Lock()
+	history := append([]printerCommand(nil), s.printerHistory...)
+	mode := s.printMode
+	active := s.activePrintEPC
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"print_mode": mode,
+		"active_epc": active,
+		"history":    history,
 	})
 }
 
@@ -518,6 +556,75 @@ func normalizePrintMode(mode string) string {
 	default:
 		return "success"
 	}
+}
+
+func (s *simulator) startPrinterCommandLocked(req bridgestate.PrintRequestSnapshot, now time.Time) {
+	s.printerSeq++
+	cmd := printerCommand{
+		ID:        s.printerSeq,
+		EPC:       strings.ToUpper(strings.TrimSpace(req.EPC)),
+		QtyText:   formatQtyText(req.Qty, req.Unit),
+		ItemName:  fallback(req.ItemName, req.ItemCode),
+		Status:    "processing",
+		Preview:   buildPrinterPreview(req),
+		CreatedAt: now.UTC().Format(time.RFC3339Nano),
+		UpdatedAt: now.UTC().Format(time.RFC3339Nano),
+	}
+	s.printerHistory = append([]printerCommand{cmd}, s.printerHistory...)
+	if len(s.printerHistory) > 20 {
+		s.printerHistory = s.printerHistory[:20]
+	}
+	log.Printf("polygon: printer command accepted epc=%s qty=%s item=%s", cmd.EPC, cmd.QtyText, cmd.ItemName)
+	log.Printf("polygon: printer preview:\n%s", cmd.Preview)
+}
+
+func (s *simulator) finishPrinterCommandLocked(epc, status, errText string, now time.Time) {
+	epc = strings.ToUpper(strings.TrimSpace(epc))
+	for i := range s.printerHistory {
+		if strings.ToUpper(strings.TrimSpace(s.printerHistory[i].EPC)) != epc {
+			continue
+		}
+		s.printerHistory[i].Status = strings.ToLower(strings.TrimSpace(status))
+		s.printerHistory[i].Error = strings.TrimSpace(errText)
+		s.printerHistory[i].UpdatedAt = now.UTC().Format(time.RFC3339Nano)
+		log.Printf("polygon: printer command finished epc=%s status=%s err=%s", epc, status, strings.TrimSpace(errText))
+		return
+	}
+}
+
+func buildPrinterPreview(req bridgestate.PrintRequestSnapshot) string {
+	epc := strings.ToUpper(strings.TrimSpace(req.EPC))
+	itemName := sanitizeZPLText(fallback(req.ItemName, req.ItemCode))
+	qtyText := sanitizeZPLText(formatQtyText(req.Qty, req.Unit))
+
+	lines := []string{
+		"~PS",
+		"^XA",
+		"^RS8,,,1,N",
+		"^RFW,H,,,A^FD" + epc + "^FS",
+		"^FO20,24^A0N,22,22^FDMAHSULOT: " + itemName + "^FS",
+		"^FO20,52^A0N,22,22^FDVAZNI: " + qtyText + "^FS",
+		"^FO20,80^A0N,22,22^FDEPC: " + epc + "^FS",
+		"^XZ",
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatQtyText(qty *float64, unit string) string {
+	u := fallback(unit, "kg")
+	if qty == nil {
+		return "- " + u
+	}
+	return strconv.FormatFloat(*qty, 'f', 3, 64) + " " + u
+}
+
+func sanitizeZPLText(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "-"
+	}
+	replacer := strings.NewReplacer("^", " ", "~", " ", "\n", " ", "\r", " ")
+	return replacer.Replace(v)
 }
 
 func formatScaleRaw(weight float64, stable bool) string {

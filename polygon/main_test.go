@@ -2,6 +2,7 @@ package main
 
 import (
 	bridgestate "bridge/state"
+	"strings"
 	"testing"
 	"time"
 )
@@ -89,5 +90,14 @@ func TestTickCompletesPendingPrintRequest(t *testing.T) {
 	}
 	if snap.Zebra.Verify != "WRITTEN" {
 		t.Fatalf("zebra verify = %q", snap.Zebra.Verify)
+	}
+	if len(sim.printerHistory) != 1 {
+		t.Fatalf("printer history len = %d", len(sim.printerHistory))
+	}
+	if sim.printerHistory[0].Status != "done" {
+		t.Fatalf("printer history status = %q", sim.printerHistory[0].Status)
+	}
+	if !strings.Contains(sim.printerHistory[0].Preview, "^RFW,H,,,A^FD3034257BF7194E406994036B^FS") {
+		t.Fatalf("printer preview missing EPC write command: %s", sim.printerHistory[0].Preview)
 	}
 }
