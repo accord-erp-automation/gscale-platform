@@ -8,12 +8,12 @@ APP_USER ?= $(shell id -un)
 APP_GROUP ?= $(shell id -gn)
 MOBILE_API_ADDR ?= 0.0.0.0:8081
 MOBILE_API_SERVER_NAME ?= $(shell hostname)
-RUN_DEV_PLATFORM ?= auto
-RUN_DEV_FLUTTER_ARGS ?=
-RUN_DEV_API_BASE_URL ?= http://127.0.0.1:8081
 CURL ?= curl
+POLYGON_DEV_BIN ?= /tmp/gscale-zebra/polygon-dev
+MOBILEAPI_DEV_BIN ?= /tmp/gscale-zebra/mobileapi-dev
+SCALE_DEV_LAUNCH_LOG ?= /tmp/gscale-zebra/scale-dev.log
 
-.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-scale run-bot run-polygon run-test run-mobileapi run-dev run-dev-auto run-dev-android run-dev-linux run-dev-services stop-dev-services run-dev-smoke test test-polygon test-mobileapi clean release release-all autostart-install autostart-status autostart-restart autostart-stop
+.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-scale run-bot run-polygon run-test run-dev stop-dev-services run-mobileapi test test-polygon test-mobileapi clean release release-all autostart-install autostart-status autostart-restart autostart-stop
 
 help:
 	@echo "Targets:"
@@ -22,11 +22,9 @@ help:
 	@echo "  make run-bot    - faqat telegram bot"
 	@echo "  make run-polygon - real qurilmasiz polygon simulator"
 	@echo "  make run-test   - polygon + scale TUI (qurilmasiz core test)"
+	@echo "  make run-dev    - polygon + mobileapi + scale TUI (mobile app'siz dev stack)"
+	@echo "  make stop-dev-services - run-dev qoldirgan servislarni to'xtatadi"
 	@echo "  make run-mobileapi - mobile API backend"
-	@echo "  make run-dev    - mobileapi + polygon + app (auto device) bitta buyruqda"
-	@echo "  make run-dev-android - mobileapi + polygon + android app"
-	@echo "  make run-dev-linux   - mobileapi + polygon + linux desktop app"
-	@echo "  make run-dev-smoke   - mobile dev stack'ni non-interaktiv tekshiradi"
 	@echo "  make build      - bot + scale + zebra binary build (./bin)"
 	@echo "  make build-polygon - polygon binary build (./bin)"
 	@echo "  make build-mobileapi - mobile API binary build (./bin)"
@@ -43,8 +41,6 @@ help:
 	@echo ""
 	@echo "Override:"
 	@echo "  make run SCALE_DEVICE=/dev/ttyUSB1 ZEBRA_DEVICE=/dev/usb/lp0"
-	@echo "  make run-dev RUN_DEV_PLATFORM=android"
-	@echo "  make run-dev RUN_DEV_PLATFORM=linux"
 
 check-env:
 	@test -f bot/.env || (echo "xato: bot/.env topilmadi (bot/.env.example dan nusxa oling)"; exit 1)
@@ -92,76 +88,77 @@ run-test:
 	sleep 1; \
 	cd scale && go run . --no-bot --no-zebra --bridge-url "http://$(POLYGON_HTTP_ADDR)/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)"
 
-run-mobileapi:
-	go run ./cmd/mobileapi
-
-run-dev: run-dev-auto
-
-run-dev-auto:
-	@set -e; \
-	trap '$(MAKE) stop-dev-services >/dev/null 2>&1 || true' EXIT INT TERM; \
-	$(MAKE) run-dev-services; \
-	$(MAKE) -C mobile_app run-auto FLUTTER_RUN_ARGS='--dart-define=API_BASE_URL=$(RUN_DEV_API_BASE_URL) $(RUN_DEV_FLUTTER_ARGS)' RUN_DEV_PLATFORM='$(RUN_DEV_PLATFORM)'
-
-run-dev-android:
-	@set -e; \
-	trap '$(MAKE) stop-dev-services >/dev/null 2>&1 || true' EXIT INT TERM; \
-	$(MAKE) run-dev-services; \
-	$(MAKE) -C mobile_app run-android FLUTTER_RUN_ARGS='--dart-define=API_BASE_URL=$(RUN_DEV_API_BASE_URL) $(RUN_DEV_FLUTTER_ARGS)'
-
-run-dev-linux:
-	@set -e; \
-	trap '$(MAKE) stop-dev-services >/dev/null 2>&1 || true' EXIT INT TERM; \
-	$(MAKE) run-dev-services; \
-	$(MAKE) -C mobile_app run-linux FLUTTER_RUN_ARGS='--dart-define=API_BASE_URL=$(RUN_DEV_API_BASE_URL) $(RUN_DEV_FLUTTER_ARGS)'
-
-run-dev-services:
+run-dev:
 	@mkdir -p /tmp/gscale-zebra
-	@pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true
-	@pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true
-	@pkill -x mobileapi 2>/dev/null || true
-	@pkill -x polygon 2>/dev/null || true
-	@rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid
-	@go build -o /tmp/gscale-zebra/mobileapi-dev ./cmd/mobileapi
-	@go build -o /tmp/gscale-zebra/polygon-dev ./polygon
-	@nohup env MOBILE_API_ADDR="$(MOBILE_API_ADDR)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" /tmp/gscale-zebra/mobileapi-dev >/tmp/gscale-zebra/mobileapi.log 2>&1 & echo $$! >/tmp/gscale-zebra/mobileapi.pid
-	@nohup /tmp/gscale-zebra/polygon-dev --http-addr "$(POLYGON_HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" >/tmp/gscale-zebra/polygon.log 2>&1 & echo $$! >/tmp/gscale-zebra/polygon.pid
-	@for i in $$(seq 1 40); do \
-		if $(CURL) -fsS "$(RUN_DEV_API_BASE_URL)/healthz" >/dev/null 2>&1; then \
-			break; \
-		fi; \
-		sleep 1; \
-	done
-	@$(CURL) -fsS "$(RUN_DEV_API_BASE_URL)/healthz" >/dev/null
-	@for i in $$(seq 1 40); do \
+	@$(MAKE) stop-dev-services >/dev/null 2>&1 || true
+	@go build -o "$(POLYGON_DEV_BIN)" ./polygon
+	@go build -o "$(MOBILEAPI_DEV_BIN)" ./cmd/mobileapi
+	@POLY_PID=""; \
+	MOBILEAPI_PID=""; \
+	SCALE_PID=""; \
+	cleanup() { \
+		if [ -n "$$SCALE_PID" ]; then kill "$$SCALE_PID" 2>/dev/null || true; fi; \
+		if [ -n "$$MOBILEAPI_PID" ]; then kill "$$MOBILEAPI_PID" 2>/dev/null || true; fi; \
+		if [ -n "$$POLY_PID" ]; then kill "$$POLY_PID" 2>/dev/null || true; fi; \
+		pgrep -f 'script -q $(SCALE_DEV_LAUNCH_LOG)' | xargs -r kill 2>/dev/null || true; \
+		pgrep -f 'go run . --no-bot --no-zebra --bridge-url http://$(POLYGON_HTTP_ADDR)/api/v1/scale --bridge-state-file $(BRIDGE_STATE_FILE)' | xargs -r kill 2>/dev/null || true; \
+		pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true; \
+		pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true; \
+		rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid; \
+	}; \
+	trap 'cleanup' EXIT INT TERM; \
+	"$(POLYGON_DEV_BIN)" --http-addr "$(POLYGON_HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" >/tmp/gscale-zebra/polygon.log 2>&1 & \
+	POLY_PID=$$!; \
+	echo "$$POLY_PID" >/tmp/gscale-zebra/polygon.pid; \
+	for i in $$(seq 1 40); do \
 		if $(CURL) -fsS "http://$(POLYGON_HTTP_ADDR)/health" >/dev/null 2>&1; then \
 			break; \
 		fi; \
 		sleep 1; \
-	done
-	@$(CURL) -fsS "http://$(POLYGON_HTTP_ADDR)/health" >/dev/null
-	@echo "mobileapi ready: $(RUN_DEV_API_BASE_URL)"
-	@echo "polygon ready:   http://$(POLYGON_HTTP_ADDR)"
+	done; \
+	if ! $(CURL) -fsS "http://$(POLYGON_HTTP_ADDR)/health" >/dev/null 2>&1; then \
+		echo "run-dev: polygon failed to start"; \
+		sed -n '1,160p' /tmp/gscale-zebra/polygon.log; \
+		exit 1; \
+	fi; \
+	env MOBILE_API_ADDR="$(MOBILE_API_ADDR)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$(POLYGON_HTTP_ADDR)" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
+	MOBILEAPI_PID=$$!; \
+	echo "$$MOBILEAPI_PID" >/tmp/gscale-zebra/mobileapi.pid; \
+	for i in $$(seq 1 40); do \
+		if $(CURL) -fsS "http://127.0.0.1:8081/healthz" >/dev/null 2>&1; then \
+			break; \
+		fi; \
+		sleep 1; \
+	done; \
+	if ! $(CURL) -fsS "http://127.0.0.1:8081/healthz" >/dev/null 2>&1; then \
+		echo "run-dev: mobileapi failed to start"; \
+		sed -n '1,160p' /tmp/gscale-zebra/mobileapi.log; \
+		exit 1; \
+	fi; \
+	rm -f "$(SCALE_DEV_LAUNCH_LOG)"; \
+	script -q "$(SCALE_DEV_LAUNCH_LOG)" zsh -lc 'cd "$(CURDIR)/scale" && go run . --no-bot --no-zebra --bridge-url "http://$(POLYGON_HTTP_ADDR)/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)"' >/dev/null 2>&1 & \
+	SCALE_PID=$$!; \
+	echo "$$SCALE_PID" >/tmp/gscale-zebra/scale.pid; \
+	sleep 1; \
+	if ! kill -0 "$$SCALE_PID" >/dev/null 2>&1; then \
+		echo "run-dev: scale failed to start"; \
+		sed -n '1,160p' "$(SCALE_DEV_LAUNCH_LOG)"; \
+		exit 1; \
+	fi; \
+	printf '[run-dev] 1/3 simulator ready: http://%s\n' "$(POLYGON_HTTP_ADDR)"; \
+	printf '[run-dev] 2/3 mobileapi ready: http://127.0.0.1:8081\n'; \
+	printf '[run-dev] 3/3 core ready:      scale running in background\n'; \
+	while :; do sleep 1; done
 
 stop-dev-services:
-	@if [ -f /tmp/gscale-zebra/mobileapi.pid ]; then kill $$(cat /tmp/gscale-zebra/mobileapi.pid) 2>/dev/null || true; fi
-	@if [ -f /tmp/gscale-zebra/polygon.pid ]; then kill $$(cat /tmp/gscale-zebra/polygon.pid) 2>/dev/null || true; fi
+	@pgrep -f 'script -q /tmp/gscale-zebra/scale-dev.log' | xargs -r kill 2>/dev/null || true
+	@pgrep -f 'go run . --no-bot --no-zebra --bridge-url http://127.0.0.1:18000/api/v1/scale --bridge-state-file /tmp/gscale-zebra/bridge_state.json' | xargs -r kill 2>/dev/null || true
 	@pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true
 	@pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true
-	@pkill -x mobileapi 2>/dev/null || true
-	@pkill -x polygon 2>/dev/null || true
-	@rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid
+	@rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid
 
-run-dev-smoke:
-	@set -e; \
-	trap '$(MAKE) stop-dev-services >/dev/null 2>&1 || true' EXIT INT TERM; \
-	$(MAKE) run-dev-services; \
-	$(CURL) -fsS "$(RUN_DEV_API_BASE_URL)/v1/mobile/handshake" >/tmp/gscale-zebra/handshake.json; \
-	$(CURL) -fsS "$(RUN_DEV_API_BASE_URL)/v1/mobile/monitor/state" >/tmp/gscale-zebra/monitor_state.json; \
-	$(MAKE) -C mobile_app analyze; \
-	$(MAKE) -C mobile_app test; \
-	$(MAKE) -C mobile_app build-linux FLUTTER_RUN_ARGS='--dart-define=API_BASE_URL=$(RUN_DEV_API_BASE_URL)'; \
-	echo "run-dev smoke passed"
+run-mobileapi:
+	go run ./cmd/mobileapi
 
 test:
 	cd bot && go test ./...
