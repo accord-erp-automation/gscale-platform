@@ -41,6 +41,7 @@ func TestLoadSupportsBridgeOverride(t *testing.T) {
 	data := "\n" +
 		"TELEGRAM_BOT_TOKEN=123:XYZ\n" +
 		"ERP_URL=https://erp.accord.uz\n" +
+		"ERP_READ_URL=http://127.0.0.1:8090\n" +
 		"ERP_API_KEY=abc\n" +
 		"ERP_API_SECRET=def\n" +
 		"BRIDGE_STATE_FILE=/tmp/custom-bridge.json\n"
@@ -54,5 +55,8 @@ func TestLoadSupportsBridgeOverride(t *testing.T) {
 	}
 	if cfg.BridgeStateFile != "/tmp/custom-bridge.json" {
 		t.Fatalf("BridgeStateFile mismatch: %q", cfg.BridgeStateFile)
+	}
+	if cfg.ERPReadURL != "http://127.0.0.1:8090" {
+		t.Fatalf("ERPReadURL mismatch: %q", cfg.ERPReadURL)
 	}
 }

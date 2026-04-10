@@ -15,6 +15,7 @@ const defaultBridgeStateFile = "/tmp/gscale-zebra/bridge_state.json"
 type Config struct {
 	TelegramBotToken string
 	ERPURL           string
+	ERPReadURL       string
 	ERPAPIKey        string
 	ERPAPISecret     string
 	BridgeStateFile  string
@@ -41,6 +42,10 @@ func Load(envPath string) (Config, error) {
 			os.Getenv("ERP_URL"),
 			fileVals["ERP_URL"],
 			fileVals["URL"],
+		),
+		ERPReadURL: firstNonEmpty(
+			os.Getenv("ERP_READ_URL"),
+			fileVals["ERP_READ_URL"],
 		),
 		ERPAPIKey: firstNonEmpty(
 			os.Getenv("ERP_API_KEY"),
@@ -87,6 +92,12 @@ func (c Config) Validate() error {
 	u, err := url.Parse(strings.TrimSpace(c.ERPURL))
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return errors.New("ERP_URL noto'g'ri (example: https://erp.accord.uz)")
+	}
+	if strings.TrimSpace(c.ERPReadURL) != "" {
+		u, err = url.Parse(strings.TrimSpace(c.ERPReadURL))
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return errors.New("ERP_READ_URL noto'g'ri (example: http://127.0.0.1:8090)")
+		}
 	}
 	return nil
 }

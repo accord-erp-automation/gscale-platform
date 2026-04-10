@@ -74,7 +74,7 @@ func New(cfg config.Config, logger *log.Logger, runLogger *log.Logger, batchLogg
 	return &App{
 		cfg:                      cfg,
 		tg:                       telegram.New(cfg.TelegramBotToken),
-		erp:                      erp.New(cfg.ERPURL, cfg.ERPAPIKey, cfg.ERPAPISecret),
+		erp:                      erp.NewWithReadURL(cfg.ERPURL, cfg.ERPAPIKey, cfg.ERPAPISecret, cfg.ERPReadURL),
 		qtyReader:                bridgeclient.New(cfg.BridgeStateFile),
 		batchState:               batchstate.New(cfg.BridgeStateFile),
 		epcHistory:               NewEPCHistory(),

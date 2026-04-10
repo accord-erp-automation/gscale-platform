@@ -30,6 +30,29 @@ func TestCheckConnection(t *testing.T) {
 	}
 }
 
+func TestCheckConnection_UsesReadServiceWhenConfigured(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Fatalf("unexpected auth header: %q", r.Header.Get("Authorization"))
+		}
+		if r.URL.Path != "/healthz" {
+			t.Fatalf("path mismatch: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+
+	c := NewWithReadURL("https://erp.example.com", "k", "s", ts.URL)
+	user, err := c.CheckConnection(context.Background())
+	if err != nil {
+		t.Fatalf("CheckConnection error: %v", err)
+	}
+	if user != "ERP DB Reader" {
+		t.Fatalf("user mismatch: %q", user)
+	}
+}
+
 func TestSearchItems(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "token k:s" {
@@ -56,6 +79,32 @@ func TestSearchItems(t *testing.T) {
 	}
 	if items[1].ItemCode != "ITM-002" || items[1].ItemName != "Banana" {
 		t.Fatalf("item[1] mismatch: %+v", items[1])
+	}
+}
+
+func TestSearchItems_UsesReadServiceWhenConfigured(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Fatalf("unexpected auth header: %q", r.Header.Get("Authorization"))
+		}
+		if r.URL.Path != "/v1/items" {
+			t.Fatalf("path mismatch: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("query"); got != "apple" {
+			t.Fatalf("query mismatch: %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"name":"ITM-001","item_code":"ITM-001","item_name":"Apple"}]}`))
+	}))
+	defer ts.Close()
+
+	c := NewWithReadURL("https://erp.example.com", "k", "s", ts.URL)
+	items, err := c.SearchItems(context.Background(), "apple", 10)
+	if err != nil {
+		t.Fatalf("SearchItems error: %v", err)
+	}
+	if len(items) != 1 || items[0].ItemCode != "ITM-001" {
+		t.Fatalf("items mismatch: %+v", items)
 	}
 }
 
@@ -88,5 +137,28 @@ func TestSearchItemWarehouses(t *testing.T) {
 	}
 	if stocks[1].Warehouse != "Stores - B" || stocks[1].ActualQty != 7 {
 		t.Fatalf("stocks[1] mismatch: %+v", stocks[1])
+	}
+}
+
+func TestSearchItemWarehouses_UsesReadServiceWhenConfigured(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Fatalf("unexpected auth header: %q", r.Header.Get("Authorization"))
+		}
+		if r.URL.Path != "/v1/items/ITM-001/warehouses" {
+			t.Fatalf("path mismatch: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"warehouse":"Stores - A","actual_qty":12.5}]}`))
+	}))
+	defer ts.Close()
+
+	c := NewWithReadURL("https://erp.example.com", "k", "s", ts.URL)
+	stocks, err := c.SearchItemWarehouses(context.Background(), "ITM-001", "", 10)
+	if err != nil {
+		t.Fatalf("SearchItemWarehouses error: %v", err)
+	}
+	if len(stocks) != 1 || stocks[0].Warehouse != "Stores - A" {
+		t.Fatalf("stocks mismatch: %+v", stocks)
 	}
 }

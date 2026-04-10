@@ -58,6 +58,7 @@ Majburiy:
 
 Ixtiyoriy/asosiy:
 
+- `ERP_READ_URL` (`item`, `warehouse`, `stock_uom`, `company` kabi read so'rovlarni DB reader service'ga yuboradi)
 - `BRIDGE_STATE_FILE` (default: `/tmp/gscale-zebra/bridge_state.json`)
 
 ## Loglar

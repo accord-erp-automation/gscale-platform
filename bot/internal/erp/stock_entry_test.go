@@ -93,6 +93,72 @@ func TestCreateMaterialReceiptDraft(t *testing.T) {
 	}
 }
 
+func TestCreateMaterialReceiptDraft_UsesReadServiceForLookups(t *testing.T) {
+	t.Helper()
+
+	type posted struct {
+		Company     string `json:"company"`
+		ToWarehouse string `json:"to_warehouse"`
+		Items       []struct {
+			ItemCode string `json:"item_code"`
+			UOM      string `json:"uom"`
+		} `json:"items"`
+	}
+
+	readTS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("unexpected read auth header: %q", got)
+		}
+		switch r.URL.Path {
+		case "/v1/warehouses/Stores - A":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"name":"Stores - A","company":"Accord"}}`))
+		case "/v1/items/ITEM-1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"name":"ITEM-1","item_code":"ITEM-1","item_name":"Item 1","stock_uom":"Kg"}}`))
+		default:
+			t.Fatalf("unexpected read request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer readTS.Close()
+
+	writeTS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "token k:s" {
+			t.Fatalf("auth header mismatch: %q", got)
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/api/resource/Stock Entry" {
+			t.Fatalf("unexpected write request: %s %s", r.Method, r.URL.Path)
+		}
+
+		var p posted
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			t.Fatalf("decode post payload: %v", err)
+		}
+		if p.Company != "Accord" || p.ToWarehouse != "Stores - A" {
+			t.Fatalf("header fields mismatch: %+v", p)
+		}
+		if len(p.Items) != 1 || p.Items[0].ItemCode != "ITEM-1" || p.Items[0].UOM != "Kg" {
+			t.Fatalf("items mismatch: %+v", p.Items)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"name":"MAT-STE-2026-00002"}}`))
+	}))
+	defer writeTS.Close()
+
+	c := NewWithReadURL(writeTS.URL, "k", "s", readTS.URL)
+	draft, err := c.CreateMaterialReceiptDraft(context.Background(), MaterialReceiptDraftInput{
+		ItemCode:  "ITEM-1",
+		Warehouse: "Stores - A",
+		Qty:       2.5,
+	})
+	if err != nil {
+		t.Fatalf("CreateMaterialReceiptDraft error: %v", err)
+	}
+	if draft.Name != "MAT-STE-2026-00002" {
+		t.Fatalf("draft name mismatch: %q", draft.Name)
+	}
+}
+
 func TestCreateMaterialReceiptDraft_Validate(t *testing.T) {
 	c := New("https://example.invalid", "k", "s")
 	_, err := c.CreateMaterialReceiptDraft(context.Background(), MaterialReceiptDraftInput{ItemCode: "", Warehouse: "W", Qty: 1})

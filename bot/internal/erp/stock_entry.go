@@ -249,6 +249,33 @@ func IsDuplicateBarcodeError(err error) bool {
 }
 
 func (c *Client) lookupWarehouseCompany(ctx context.Context, warehouse string) (string, error) {
+	if c.readURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.readURL+"/v1/warehouses/"+url.PathEscape(strings.TrimSpace(warehouse)), nil)
+		if err != nil {
+			return "", err
+		}
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 128*1024))
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			return "", fmt.Errorf("erp read warehouse http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+
+		var payload warehouseDetailResponse
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return "", fmt.Errorf("erp read warehouse json parse xato: %w", err)
+		}
+		if strings.TrimSpace(payload.Data.Company) == "" {
+			return "", fmt.Errorf("warehouse company topilmadi: %s", warehouse)
+		}
+		return strings.TrimSpace(payload.Data.Company), nil
+	}
+
 	q := url.Values{}
 	q.Set("fields", `[`+"\"name\",\"company\""+`]`)
 	filters := [][]interface{}{{"Warehouse", "name", "=", warehouse}}
@@ -285,6 +312,33 @@ func (c *Client) lookupWarehouseCompany(ctx context.Context, warehouse string) (
 }
 
 func (c *Client) lookupItemStockUOM(ctx context.Context, itemCode string) (string, error) {
+	if c.readURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.readURL+"/v1/items/"+url.PathEscape(strings.TrimSpace(itemCode)), nil)
+		if err != nil {
+			return "", err
+		}
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 128*1024))
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			return "", fmt.Errorf("erp read item http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+
+		var payload itemDetailResponse
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return "", fmt.Errorf("erp read item json parse xato: %w", err)
+		}
+		if strings.TrimSpace(payload.Data.ItemCode) == "" && strings.TrimSpace(payload.Data.Name) == "" {
+			return "", fmt.Errorf("item topilmadi: %s", itemCode)
+		}
+		return strings.TrimSpace(payload.Data.StockUOM), nil
+	}
+
 	q := url.Values{}
 	q.Set("fields", `[`+"\"name\",\"stock_uom\""+`]`)
 	filters := [][]interface{}{{"Item", "item_code", "=", itemCode}}

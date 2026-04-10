@@ -10,7 +10,7 @@ import (
 
 func (a *App) Run(ctx context.Context) error {
 	a.setBatchState(false, 0, SelectedContext{})
-	a.logRun.Printf("bot started, ERP=%s bridge_state=%s", a.cfg.ERPURL, a.cfg.BridgeStateFile)
+	a.logRun.Printf("bot started, ERP=%s ERP_READ=%s bridge_state=%s", a.cfg.ERPURL, a.cfg.ERPReadURL, a.cfg.BridgeStateFile)
 	defer a.stopAllBatchSessions()
 	defer a.setBatchState(false, 0, SelectedContext{})
 	var offset int64
