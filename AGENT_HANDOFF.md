@@ -2,173 +2,272 @@
 
 ## Scope
 
-This workspace currently has two git-tracked codebases that matter:
+This workspace currently matters across three local codebases:
 
 - `gscale-zebra`
-- `hard_con_v2` (nested repo used as the current mobile client)
+- `erp_scz_db_reader` at `/home/wikki/storage/local.git/erpnext_n1/erp/gscale_erp_read`
+- the current mobile app checkout at `/home/wikki/storage/local.git/erpnext_stock_telegram/mobile_app`
 
-There is also a separate local ERPNext/Frappe bench checkout on this machine, but it is **not** tracked by this repository.
+The ERP bench itself is at:
+
+- `/home/wikki/storage/local.git/erpnext_n1/erp`
+
+The mobile app checkout now tracks:
+
+- `origin = git@github.com:WIKKIwk/hard_con_v2.git`
+- `legacy-origin = git@github.com:WIKKIwk/ERP_mobile.git`
 
 ## Current Repo State
 
 - `gscale-zebra`
   - branch: `main`
-  - clean working tree
-  - HEAD: `42d2f7c` (`Refine local dev run targets`)
+  - HEAD: `4dc076f` (`Stop Material Receipt from starting batch`)
+  - `origin/main` is the same commit
+  - working tree may look dirty because live processes are currently writing log files
 
-- `hard_con_v2`
+- `erp_scz_db_reader`
   - branch: `main`
-  - clean working tree
+  - HEAD: `cb27235` (`Filter ERP item search by stock`)
+  - ahead of `origin/main` by 1 commit
+  - not pushed yet
+
+- `mobile_app` checkout
+  - path: `/home/wikki/storage/local.git/erpnext_stock_telegram/mobile_app`
+  - branch: `main`
   - HEAD: `70dc1e1` (`Split dashboard and add control panel`)
+  - synced with `hard_con_v2`
+
+## Active Local Processes Right Now
+
+At the time of writing this handoff, these local processes are still running:
+
+- `make run-dev`
+- `polygon-dev`
+- `mobileapi-dev`
+- `scale` via `script ... /tmp/gscale-zebra/scale-dev.log`
+- `make run-bot`
+- `go run ./cmd/bot`
+
+If the next agent wants a clean slate, stop them first:
+
+```bash
+cd /home/wikki/storage/local.git/gscale-zebra
+make stop-dev-services
+make stop-bot-services
+```
 
 ## What Was Completed
 
-### 1. Local gscale dev flow
+### 1. ERP read service was created outside `gscale-zebra`
 
-`Makefile` in `gscale-zebra` was adjusted so local dev/testing is easier.
+Location:
+
+- `/home/wikki/storage/local.git/erpnext_n1/erp/gscale_erp_read`
+
+Purpose:
+
+- standalone read-only Go service on the ERP side
+- item search
+- warehouse shortlist
+- item detail (`stock_uom`)
+- warehouse detail (`company`)
+
+Important endpoints currently implemented:
+
+- `GET /healthz`
+- `GET /v1/items?query=...&limit=...`
+- `GET /v1/items/{item_code}`
+- `GET /v1/items/{item_code}/warehouses?query=...&limit=...`
+- `GET /v1/warehouses/{warehouse}`
 
 Important behavior:
 
-- `make run-dev` now brings up the local fake stack for development
-- it is intended for:
-  - polygon simulator
-  - mobileapi
-  - scale side flow
-- mobile app runtime is not part of that target
+- item search is now filtered by stock
+- it only returns items with positive `tabBin.actual_qty`
 
-### 2. Mobile UI split
+Relevant commit in service repo:
 
-`hard_con_v2` now has a cleaner three-panel structure:
+- `cb27235` `Filter ERP item search by stock`
 
-- `Server`
-- `Line`
-- `Control`
+### 2. Bot reads now use the ERP DB reader
 
-`Control` is currently UI-only and is meant as the future destination for a subset of the Telegram bot workflow:
+In `gscale-zebra`, bot read-paths were switched so that when `ERP_READ_URL` is set:
 
-- product selection
-- batch start/stop
-- live kg display
+- `CheckConnection`
+- `SearchItems`
+- `SearchItemWarehouses`
+- `lookupItemStockUOM`
+- `lookupWarehouseCompany`
 
-The current app keeps the existing server and line pages, and adds a separate control page instead of overloading a single dashboard.
+use the ERP DB reader service instead of direct ERP REST.
 
-### 3. ERP bench recovery on this machine
+Write-paths still stay on ERP REST:
 
-A separate local ERPNext bench checkout was repaired enough to run locally on this Mac.
+- create draft
+- submit draft
+- delete draft
 
-Important local-only outcomes:
+Relevant commit:
 
-- a fresh site was created:
-  - site: `erpfresh.localhost`
-  - login: `Administrator`
-  - password: `1`
-- `bench start` and `bench stop` were made usable from the bench root on this machine
-- assets were rebuilt so the login page is styled again
+- `a33971b` `Route bot reads through ERP DB reader`
 
-These ERP-side changes are **not committed here**, because that bench checkout is outside this repo and was not git-managed in this session.
+Local config note:
 
-## Important Architecture Decision
+- `bot/.env` was updated locally so `ERP_READ_URL=http://127.0.0.1:8090`
+- this `.env` is not tracked in git
 
-The next service should **not** live inside `gscale-zebra`.
+### 3. Polygon was upgraded to feel more like real hardware
 
-The agreed direction is:
+`polygon` is no longer just a rigid fixed loop.
 
-- `gscale-zebra` bot remains the main orchestrator
-- ERPNext stays on its own machine / bench host
-- a new **standalone Go read-only service** should live on the ERP side
-- bot and mobile app will call that service over HTTP
-- ERP write operations should continue to go through the existing ERP API flow
+It now supports realistic scenarios:
 
-This means:
+- `batch-flow`
+- `idle`
+- `stress`
+- `calibration`
 
-- do **not** continue by extending `mobileapi` for the ERP read gateway
-- do **not** move ERP write logic into direct DB writes
-- do **not** collapse ERP-side service and gscale runtime into one process
+It also supports runtime scenario switching and better fake zebra logs.
 
-## Bot Workflow Summary
+Relevant commits:
 
-The Telegram bot workflow is already mostly usable as the business source of truth.
+- `0baa4eb` `Make polygon feel more like real hardware`
+- `2e9d1cb` `Show richer run-dev workflow logs`
+- `3762b29` `Trim run-dev output to printer flow`
+- `d0b15bc` `Let polygon own simulated print requests`
 
-Current flow:
+### 4. Runtime make targets were stabilized and made fresher
 
-1. `/batch`
-2. item search
-3. warehouse selection
-4. `Material Receipt` start
-5. wait for stable positive qty from bridge state
-6. create EPC
-7. create ERP draft
-8. set `print_request`
-9. wait for print result
-10. submit or delete draft
+Important fixes:
 
-This is why the upcoming service can stay read-only for now:
+- `make run-dev` startup was stabilized
+- bad `script` invocation was fixed
+- `stop-bot-services` no longer kills `make run-bot` itself
+- tracked runtime targets now try to start from a fresh bridge state
 
-- item search can be offloaded
-- warehouse shortlist can be offloaded
-- filtering/ranking can be centralized
-- core batch orchestration can remain in bot/app logic until later
+Relevant commits:
 
-## ERP Bench Notes For The Next Agent
+- `bd2ee80` `Stabilize make run-dev startup`
+- `e5013a0` `Make runtime targets start fresh`
+- `00c6379` `Avoid self-kill in stop-bot-services`
 
-Do **not** rely on a hardcoded filesystem path for the ERP repo.
+### 5. Batch start behavior was tightened
 
-Find the ERP bench checkout by looking for a local repository/folder with this shape:
+The flow was changed so batch does **not** auto-start after selection anymore.
 
-- `Procfile`
-- `apps/`
-- `sites/`
-- `config/`
-- `restart_bench.sh`
-- `stop_bench.sh`
+Current intended behavior:
 
-Operational notes:
+1. item selection
+2. warehouse selection
+3. explicit `Batch Start`
+4. only then batch loop starts
 
-- run `bench start` from the bench root
-- run `bench stop` from the bench root
-- default site is `erpfresh.localhost`
-- if UI assets break again, rerun `bench build`
+Also:
 
-There were local ERP bench adjustments made for this machine:
+- `Material Receipt` callback no longer starts batch at all
+- it now only tells the user to press `Batch Start`
 
-- broken Linux-origin paths were repaired
-- asset links were repaired
-- `watch` was intentionally disabled in `Procfile` to keep local start stable
+Relevant commits:
 
-So if the next agent sees missing live-reload behavior, that is intentional and not the first thing to undo.
+- `cc4e23d` `Require explicit batch start after selection`
+- `4dc076f` `Stop Material Receipt from starting batch`
 
-## Recommended Next Steps
+## Important Current Behavior
 
-### Immediate next implementation target
+### Telegram bot logic owner
 
-Create a new standalone Go service on the ERP side.
+Right now the Telegram bot still owns the real orchestration logic:
 
-Initial version should do only:
+- wait for stable positive qty
+- create EPC
+- create ERP draft
+- write `print_request`
+- wait for print result
+- submit/delete draft
 
-1. health endpoint
-2. MariaDB read-only connection
-3. item search endpoint
-4. warehouse shortlist endpoint for a selected item
+This logic currently lives primarily in:
 
-### Suggested endpoint contract
+- `/home/wikki/storage/local.git/gscale-zebra/bot/internal/app/callback_handler.go`
+- `/home/wikki/storage/local.git/gscale-zebra/bot/internal/batchstate/store.go`
 
-- `GET /healthz`
-- `GET /v1/items?query=...`
-- `GET /v1/items/{item_code}/warehouses?query=...`
+### Mobile API is still mostly monitor/read API
 
-### Suggested rollout order
+`mobileapi` currently provides:
 
-1. scaffold standalone service repo/folder
-2. add config + DB connection
-3. implement item search
-4. implement warehouse shortlist
-5. test against local ERP bench
-6. switch bot read path from ERP HTTP search to new service
-7. then wire the mobile control panel to the same service
+- health
+- handshake
+- simple local auth
+- profile
+- monitor snapshot
+- monitor stream
 
-## Things To Avoid
+It does **not** yet expose real control endpoints for:
 
-- Do not hardcode a local ERP path into documentation or code comments.
-- Do not move ERP write operations to direct SQL.
-- Do not assume the ERP bench repo is under git control.
-- Do not remove the current bot workflow before the new service proves parity for read operations.
+- item selection
+- warehouse selection
+- batch start
+- batch stop
+- orchestration actions
+
+Relevant files:
+
+- `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/server.go`
+- `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/config.go`
+
+## Most Important Architecture Direction
+
+The intended architecture should become:
+
+- one shared workflow/core layer
+- Telegram bot = client
+- mobile app = client
+- future web UI = client
+
+That means:
+
+- do not keep business workflow logic duplicated in Telegram bot handlers and future mobile handlers
+- do not put heavy business logic directly into `mobileapi` HTTP handlers
+- first extract orchestration from the bot into a reusable service layer
+- then let both bot and `mobileapi` call that service layer
+
+## What The Next Agent Should Do
+
+### Main next task
+
+Use the current `mobileapi` as the HTTP entrypoint for mobile/web control, but only after extracting the batch orchestration into a reusable core/application layer.
+
+### Recommended sequence
+
+1. Extract a shared batch workflow service out of bot orchestration code.
+2. Keep Telegram bot as a thin client over that service.
+3. Add control endpoints to `mobileapi` for:
+   - item search
+   - warehouse shortlist
+   - batch state
+   - batch start
+   - batch stop
+4. Make the mobile app consume those endpoints.
+
+### Suggested first control endpoints
+
+- `GET /v1/mobile/items?query=...`
+- `GET /v1/mobile/items/{item_code}/warehouses?query=...`
+- `GET /v1/mobile/batch/state`
+- `POST /v1/mobile/batch/start`
+- `POST /v1/mobile/batch/stop`
+
+## Things To Be Careful About
+
+- There are live local processes right now. Stop them before doing runtime debugging.
+- `bot/.env` is local and untracked. Do not accidentally commit secrets.
+- `erp_scz_db_reader` has an unpushed commit (`cb27235`). Keep that in mind if the next agent changes the service again.
+- The mobile app checkout is not inside this repo; it lives at `/home/wikki/storage/local.git/erpnext_stock_telegram/mobile_app`.
+- `Material Receipt` must not start batch anymore. Only `Batch Start` is allowed to do that.
+
+## Good Starting Files For The Next Agent
+
+- `/home/wikki/storage/local.git/gscale-zebra/bot/internal/app/callback_handler.go`
+- `/home/wikki/storage/local.git/gscale-zebra/bot/internal/batchstate/store.go`
+- `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/server.go`
+- `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/config.go`
+- `/home/wikki/storage/local.git/erpnext_n1/erp/gscale_erp_read/internal/store/store.go`
