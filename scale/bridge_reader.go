@@ -91,7 +91,15 @@ func startBridgeReader(ctx context.Context, url string, interval time.Duration, 
 					stableText = "false"
 				}
 			}
-			lg.Printf("bridge reading: weight=%v unit=%s stable=%s err=%s", payload.Weight, strings.TrimSpace(payload.Unit), stableText, strings.TrimSpace(payload.Error))
+			weightText := "-"
+			if payload.Weight != nil {
+				weightText = fmt.Sprintf("%.3f", *payload.Weight)
+			}
+			unitText := strings.TrimSpace(payload.Unit)
+			if unitText == "" {
+				unitText = "kg"
+			}
+			lg.Printf("bridge reading: weight=%s %s stable=%s err=%s raw=%q", weightText, unitText, stableText, strings.TrimSpace(payload.Error), strings.TrimSpace(payload.Raw))
 		}
 	}()
 }

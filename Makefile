@@ -99,10 +99,19 @@ run-dev:
 	@POLY_PID=""; \
 	MOBILEAPI_PID=""; \
 	SCALE_PID=""; \
+	TAIL_PIDS=""; \
+	start_tail() { \
+		FILE="$$1"; \
+		LABEL="$$2"; \
+		touch "$$FILE"; \
+		tail -n 0 -F "$$FILE" 2>/dev/null | sed -u "s/^/[$$LABEL] /" & \
+		TAIL_PIDS="$$TAIL_PIDS $$!"; \
+	}; \
 	cleanup() { \
 		if [ -n "$$SCALE_PID" ]; then kill "$$SCALE_PID" 2>/dev/null || true; fi; \
 		if [ -n "$$MOBILEAPI_PID" ]; then kill "$$MOBILEAPI_PID" 2>/dev/null || true; fi; \
 		if [ -n "$$POLY_PID" ]; then kill "$$POLY_PID" 2>/dev/null || true; fi; \
+		if [ -n "$$TAIL_PIDS" ]; then kill $$TAIL_PIDS 2>/dev/null || true; fi; \
 		pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true; \
 		pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true; \
 		rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid; \
@@ -146,10 +155,16 @@ run-dev:
 			sed -n '1,160p' "$(SCALE_DEV_LAUNCH_LOG)"; \
 			exit 1; \
 		fi; \
-	printf '[run-dev] 1/3 simulator ready: http://%s\n' "$(POLYGON_HTTP_ADDR)"; \
-	printf '[run-dev] 2/3 mobileapi ready: http://127.0.0.1:8081\n'; \
-	printf '[run-dev] 3/3 core ready:      scale running in background\n'; \
-	while :; do sleep 1; done
+		printf '[run-dev] 1/3 simulator ready: http://%s\n' "$(POLYGON_HTTP_ADDR)"; \
+		printf '[run-dev] 2/3 mobileapi ready: http://127.0.0.1:8081\n'; \
+		printf '[run-dev] 3/3 core ready:      scale running in background\n'; \
+		printf '[run-dev] live logs: polygon, scale bridge, scale print_request, fake zebra, bot batch\n'; \
+		start_tail /tmp/gscale-zebra/polygon.log polygon; \
+		start_tail "$(CURDIR)/logs/scale/worker.bridge.log" scale.bridge; \
+		start_tail "$(CURDIR)/logs/scale/worker.print_request.log" scale.print_request; \
+		start_tail "$(CURDIR)/logs/scale/worker.zebra_action.log" scale.zebra; \
+		start_tail "$(CURDIR)/logs/bot/worker.batch.log" bot.batch; \
+		while :; do sleep 1; done
 
 stop-dev-services:
 	@if [ -f /tmp/gscale-zebra/scale.pid ]; then kill $$(cat /tmp/gscale-zebra/scale.pid) 2>/dev/null || true; fi

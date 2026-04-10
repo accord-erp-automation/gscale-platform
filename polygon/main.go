@@ -809,7 +809,8 @@ func (s *simulator) startPrinterCommandLocked(req bridgestate.PrintRequestSnapsh
 	if len(s.printerHistory) > 20 {
 		s.printerHistory = s.printerHistory[:20]
 	}
-	log.Printf("polygon: printer command accepted epc=%s qty=%s item=%s", cmd.EPC, cmd.QtyText, cmd.ItemName)
+	log.Printf("polygon: fake zebra accepted encode request epc=%s qty=%s item=%s", cmd.EPC, cmd.QtyText, cmd.ItemName)
+	log.Printf("polygon: fake zebra will write RFID EPC and print label for item=%s qty=%s", cmd.ItemName, cmd.QtyText)
 	log.Printf("polygon: printer preview:\n%s", cmd.Preview)
 }
 
@@ -822,7 +823,11 @@ func (s *simulator) finishPrinterCommandLocked(epc, status, errText string, now 
 		s.printerHistory[i].Status = strings.ToLower(strings.TrimSpace(status))
 		s.printerHistory[i].Error = strings.TrimSpace(errText)
 		s.printerHistory[i].UpdatedAt = now.UTC().Format(time.RFC3339Nano)
-		log.Printf("polygon: printer command finished epc=%s status=%s err=%s", epc, status, strings.TrimSpace(errText))
+		if strings.EqualFold(strings.TrimSpace(status), "done") {
+			log.Printf("polygon: fake zebra finished encode+print epc=%s status=%s", epc, status)
+		} else {
+			log.Printf("polygon: fake zebra finished encode+print epc=%s status=%s err=%s", epc, status, strings.TrimSpace(errText))
+		}
 		return
 	}
 }

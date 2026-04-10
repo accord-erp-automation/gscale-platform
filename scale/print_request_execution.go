@@ -2,6 +2,7 @@ package main
 
 import (
 	bridgestate "bridge/state"
+	"fmt"
 	"strings"
 	"time"
 
@@ -67,9 +68,16 @@ func (m *tuiModel) syncPendingPrintRequest(now time.Time) tea.Cmd {
 		return nil
 	}
 
+	lg := workerLog("worker.print_request")
 	epc := strings.ToUpper(strings.TrimSpace(req.EPC))
+	qtyText := formatQty(req.Qty, req.Unit)
+	itemLabel := strings.TrimSpace(req.ItemName)
+	if itemLabel == "" {
+		itemLabel = strings.TrimSpace(req.ItemCode)
+	}
 	switch decidePendingPrintRequest(req, m.zebra, m.activePrintRequestEPC, m.zebraUpdates != nil) {
 	case printRequestMarkDone:
+		lg.Printf("request already satisfied: epc=%s item=%s qty=%s", epc, itemLabel, qtyText)
 		if err := writePrintRequestStatus(m.bridgeStore, epc, "done", ""); err != nil {
 			m.info = "print request status xato: " + err.Error()
 			return nil
@@ -77,6 +85,7 @@ func (m *tuiModel) syncPendingPrintRequest(now time.Time) tea.Cmd {
 		m.info = "print request already satisfied: epc=" + epc
 		return nil
 	case printRequestErrorDisabled:
+		lg.Printf("request blocked: zebra disabled epc=%s item=%s qty=%s", epc, itemLabel, qtyText)
 		if err := writePrintRequestStatus(m.bridgeStore, epc, "error", "zebra disabled"); err != nil {
 			m.info = "print request status xato: " + err.Error()
 			return nil
@@ -84,6 +93,7 @@ func (m *tuiModel) syncPendingPrintRequest(now time.Time) tea.Cmd {
 		m.info = "print request xato: zebra disabled"
 		return nil
 	case printRequestExecute:
+		lg.Printf("request queued: epc=%s item=%s qty=%s -> fake zebra encode", epc, itemLabel, qtyText)
 		if err := writePrintRequestStatus(m.bridgeStore, epc, "processing", ""); err != nil {
 			m.info = "print request status xato: " + err.Error()
 			return nil
@@ -94,4 +104,15 @@ func (m *tuiModel) syncPendingPrintRequest(now time.Time) tea.Cmd {
 	default:
 		return nil
 	}
+}
+
+func formatQty(qty *float64, unit string) string {
+	u := strings.TrimSpace(unit)
+	if u == "" {
+		u = "kg"
+	}
+	if qty == nil {
+		return "- " + u
+	}
+	return fmt.Sprintf("%.3f %s", *qty, u)
 }
