@@ -7,7 +7,7 @@ PRINT_DELAY ?= 1100ms
 SCENARIO ?= batch-flow
 SEED ?= 42
 
-.PHONY: help run build test
+.PHONY: help run build test fresh-state
 
 help:
 	@echo "Targets:"
@@ -20,7 +20,11 @@ help:
 	@echo "  make run PRINT_MODE=alternate"
 	@echo "  make run SCENARIO=stress"
 
-run:
+fresh-state:
+	@mkdir -p $$(dirname "$(BRIDGE_STATE_FILE)")
+	@rm -f "$(BRIDGE_STATE_FILE)" "$(BRIDGE_STATE_FILE).lock"
+
+run: fresh-state
 	go run . --http-addr "$(HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" --print-mode "$(PRINT_MODE)" --print-delay "$(PRINT_DELAY)" --scenario "$(SCENARIO)" --seed "$(SEED)"
 
 build:

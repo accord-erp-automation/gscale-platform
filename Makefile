@@ -15,7 +15,7 @@ POLYGON_DEV_BIN ?= /tmp/gscale-zebra/polygon-dev
 MOBILEAPI_DEV_BIN ?= /tmp/gscale-zebra/mobileapi-dev
 SCALE_DEV_LAUNCH_LOG ?= /tmp/gscale-zebra/scale-dev.log
 
-.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-scale run-bot run-polygon run-test run-dev stop-dev-services run-mobileapi test test-polygon test-mobileapi clean release release-all autostart-install autostart-status autostart-restart autostart-stop
+.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-scale run-bot run-polygon run-test run-dev stop-dev-services stop-bot-services fresh-bridge-state run-mobileapi test test-polygon test-mobileapi clean release release-all autostart-install autostart-status autostart-restart autostart-stop
 
 help:
 	@echo "Targets:"
@@ -26,6 +26,7 @@ help:
 	@echo "  make run-test   - polygon + scale TUI (qurilmasiz core test)"
 	@echo "  make run-dev    - polygon + mobileapi + scale TUI (mobile app'siz dev stack)"
 	@echo "  make stop-dev-services - run-dev qoldirgan servislarni to'xtatadi"
+	@echo "  make stop-bot-services - ishlayotgan bot processlarini to'xtatadi"
 	@echo "  make run-mobileapi - mobile API backend"
 	@echo "  make build      - bot + scale + zebra binary build (./bin)"
 	@echo "  make build-polygon - polygon binary build (./bin)"
@@ -47,6 +48,10 @@ help:
 
 check-env:
 	@test -f bot/.env || (echo "xato: bot/.env topilmadi (bot/.env.example dan nusxa oling)"; exit 1)
+
+fresh-bridge-state:
+	@mkdir -p /tmp/gscale-zebra
+	@rm -f "$(BRIDGE_STATE_FILE)" "$(BRIDGE_STATE_FILE).lock"
 
 build: build-bot build-scale build-zebra
 
@@ -70,21 +75,19 @@ build-mobileapi:
 	@mkdir -p bin
 	go build -o ./bin/mobileapi ./cmd/mobileapi
 
-run: check-env
+run: check-env fresh-bridge-state stop-dev-services stop-bot-services
 	cd scale && go run . --no-bridge --device "$(SCALE_DEVICE)" --zebra-device "$(ZEBRA_DEVICE)" --bridge-state-file "$(BRIDGE_STATE_FILE)"
 
-run-scale:
+run-scale: fresh-bridge-state stop-dev-services stop-bot-services
 	cd scale && go run . --no-bot --no-bridge --device "$(SCALE_DEVICE)" --zebra-device "$(ZEBRA_DEVICE)" --bridge-state-file "$(BRIDGE_STATE_FILE)"
 
-run-bot: check-env
+run-bot: check-env fresh-bridge-state stop-bot-services
 	cd bot && go run ./cmd/bot
 
-run-polygon:
+run-polygon: fresh-bridge-state stop-dev-services stop-bot-services
 	$(MAKE) -C polygon run
 
-run-test:
-	@mkdir -p /tmp/gscale-zebra
-	@rm -f "$(BRIDGE_STATE_FILE)" "$(BRIDGE_STATE_FILE).lock"
+run-test: fresh-bridge-state stop-dev-services stop-bot-services
 	@POLY_PID=""; \
 	trap 'if [ -n "$$POLY_PID" ]; then kill $$POLY_PID 2>/dev/null || true; fi' EXIT INT TERM; \
 	(cd polygon && go run . --http-addr "$(POLYGON_HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" >/tmp/gscale-zebra/polygon.log 2>&1) & \
@@ -92,10 +95,9 @@ run-test:
 	sleep 1; \
 	cd scale && go run . --no-bot --no-zebra --bridge-url "http://$(POLYGON_HTTP_ADDR)/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)"
 
-run-dev:
-	@mkdir -p /tmp/gscale-zebra
+run-dev: fresh-bridge-state
 	@$(MAKE) stop-dev-services >/dev/null 2>&1 || true
-	@rm -f "$(BRIDGE_STATE_FILE)" "$(BRIDGE_STATE_FILE).lock"
+	@$(MAKE) stop-bot-services >/dev/null 2>&1 || true
 	@go build -o "$(POLYGON_DEV_BIN)" ./polygon
 	@go build -o "$(MOBILEAPI_DEV_BIN)" ./cmd/mobileapi
 	@POLY_PID=""; \
@@ -175,6 +177,12 @@ stop-dev-services:
 	@pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true
 	@pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true
 	@rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid
+
+stop-bot-services:
+	@pkill -f '[g]o run ./cmd/bot' 2>/dev/null || true
+	@pkill -f '/go-build/.*/[b]ot' 2>/dev/null || true
+	@pkill -f '[m]ake run-bot' 2>/dev/null || true
+	@pkill -x bot 2>/dev/null || true
 
 run-mobileapi:
 	go run ./cmd/mobileapi
