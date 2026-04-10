@@ -19,6 +19,10 @@ type Config struct {
 	BridgeStateFile string
 	ProfileFile     string
 	PolygonURL      string
+	ERPURL          string
+	ERPReadURL      string
+	ERPAPIKey       string
+	ERPAPISecret    string
 	ServerName      string
 	LoginPhone      string
 	LoginCode       string
@@ -50,6 +54,10 @@ func LoadConfig() Config {
 		BridgeStateFile: firstNonEmpty(os.Getenv("BRIDGE_STATE_FILE"), defaultBridgeStateFile),
 		ProfileFile:     firstNonEmpty(os.Getenv("MOBILE_API_PROFILE_FILE"), defaultProfileFile),
 		PolygonURL:      firstNonEmpty(os.Getenv("POLYGON_URL"), defaultPolygonURL),
+		ERPURL:          firstNonEmpty(os.Getenv("ERP_URL")),
+		ERPReadURL:      firstNonEmpty(os.Getenv("ERP_READ_URL")),
+		ERPAPIKey:       firstNonEmpty(os.Getenv("ERP_API_KEY")),
+		ERPAPISecret:    firstNonEmpty(os.Getenv("ERP_API_SECRET")),
 		ServerName:      firstNonEmpty(os.Getenv("MOBILE_API_SERVER_NAME"), hostname, "gscale-zebra"),
 		LoginPhone:      phone,
 		LoginCode:       firstNonEmpty(os.Getenv("MOBILE_API_CODE"), "1234"),

@@ -15,6 +15,7 @@ import (
 func main() {
 	cfg := mobileapi.LoadConfig()
 	srv := mobileapi.New(cfg)
+	defer srv.Close()
 
 	server := &http.Server{
 		Addr:    cfg.ListenAddr,

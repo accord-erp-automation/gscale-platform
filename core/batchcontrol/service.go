@@ -8,14 +8,14 @@ import (
 )
 
 type Item struct {
-	Name     string
-	ItemCode string
-	ItemName string
+	Name     string `json:"name,omitempty"`
+	ItemCode string `json:"item_code"`
+	ItemName string `json:"item_name"`
 }
 
 type WarehouseStock struct {
-	Warehouse string
-	ActualQty float64
+	Warehouse string  `json:"warehouse"`
+	ActualQty float64 `json:"actual_qty"`
 }
 
 type Catalog interface {

@@ -14,8 +14,13 @@ CURL ?= curl
 POLYGON_DEV_BIN ?= /tmp/gscale-zebra/polygon-dev
 MOBILEAPI_DEV_BIN ?= /tmp/gscale-zebra/mobileapi-dev
 SCALE_DEV_LAUNCH_LOG ?= /tmp/gscale-zebra/scale-dev.log
+MOBILE_APP_DIR ?= /home/wikki/storage/local.git/erpnext_stock_telegram/mobile_app
+MOBILE_API_PORT ?= $(shell printf '%s\n' "$(MOBILE_API_ADDR)" | awk -F: '{print $$NF}')
+MOBILE_API_BASE_URL ?= http://127.0.0.1:$(MOBILE_API_PORT)
+MOBILE_RUN_TARGET ?= run-auto
+MOBILE_FLUTTER_RUN_ARGS ?= --dart-define=API_BASE_URL=$(MOBILE_API_BASE_URL)
 
-.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-scale run-bot run-polygon run-test run-dev stop-dev-services stop-bot-services fresh-bridge-state run-mobileapi test test-polygon test-mobileapi clean release release-all autostart-install autostart-status autostart-restart autostart-stop
+.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-scale run-bot run-polygon run-test run-dev run-mobile run-mobile-android run-mobile-linux run-mobile-web stop-dev-services stop-bot-services fresh-bridge-state run-mobileapi test test-polygon test-mobileapi clean release release-all autostart-install autostart-status autostart-restart autostart-stop
 
 help:
 	@echo "Targets:"
@@ -24,7 +29,11 @@ help:
 	@echo "  make run-bot    - faqat telegram bot"
 	@echo "  make run-polygon - real qurilmasiz polygon simulator"
 	@echo "  make run-test   - polygon + scale TUI (qurilmasiz core test)"
-	@echo "  make run-dev    - polygon + mobileapi + scale TUI (mobile app'siz dev stack)"
+	@echo "  make run-dev    - backend/core dev stack: polygon + mobileapi + scale"
+	@echo "  make run-mobile - Flutter mobile client (default: auto device)"
+	@echo "  make run-mobile-android - Flutter mobile client Android uchun"
+	@echo "  make run-mobile-linux   - Flutter mobile client Linux desktop uchun"
+	@echo "  make run-mobile-web     - Flutter mobile client Web uchun"
 	@echo "  make stop-dev-services - run-dev qoldirgan servislarni to'xtatadi"
 	@echo "  make stop-bot-services - ishlayotgan bot processlarini to'xtatadi"
 	@echo "  make run-mobileapi - mobile API backend"
@@ -45,6 +54,8 @@ help:
 	@echo "Override:"
 	@echo "  make run SCALE_DEVICE=/dev/ttyUSB1 ZEBRA_DEVICE=/dev/usb/lp0"
 	@echo "  make run-polygon SCENARIO=stress"
+	@echo "  make run-mobile MOBILE_API_BASE_URL=http://127.0.0.1:8081"
+	@echo "  make run-mobile-android MOBILE_APP_DIR=/path/to/mobile_app"
 
 check-env:
 	@test -f bot/.env || (echo "xato: bot/.env topilmadi (bot/.env.example dan nusxa oling)"; exit 1)
@@ -179,6 +190,19 @@ stop-bot-services:
 	@pkill -f '[g]o run ./cmd/bot' 2>/dev/null || true
 	@pkill -f '/go-build/.*/[b]ot' 2>/dev/null || true
 	@pkill -x bot 2>/dev/null || true
+
+run-mobile:
+	@test -d "$(MOBILE_APP_DIR)" || (echo "xato: mobile app checkout topilmadi: $(MOBILE_APP_DIR)"; exit 1)
+	$(MAKE) -C "$(MOBILE_APP_DIR)" "$(MOBILE_RUN_TARGET)" FLUTTER_RUN_ARGS="$(MOBILE_FLUTTER_RUN_ARGS)"
+
+run-mobile-android:
+	@$(MAKE) run-mobile MOBILE_RUN_TARGET=run-android
+
+run-mobile-linux:
+	@$(MAKE) run-mobile MOBILE_RUN_TARGET=run-linux
+
+run-mobile-web:
+	@$(MAKE) run-mobile MOBILE_RUN_TARGET=run-web
 
 run-mobileapi:
 	go run ./cmd/mobileapi

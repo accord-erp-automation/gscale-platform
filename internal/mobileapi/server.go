@@ -2,6 +2,9 @@ package mobileapi
 
 import (
 	bridgestate "bridge/state"
+	"context"
+	"core/batchcontrol"
+	"core/workflow"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,21 +33,55 @@ type authLoginRequest struct {
 	Code  string `json:"code"`
 }
 
+type batchStartRequest struct {
+	ItemCode  string `json:"item_code"`
+	ItemName  string `json:"item_name"`
+	Warehouse string `json:"warehouse"`
+}
+
 type Server struct {
-	cfg   Config
-	store *bridgestate.Store
-	http  *http.Client
+	cfg           Config
+	store         *bridgestate.Store
+	http          *http.Client
+	control       *batchcontrol.Service
+	controlCtx    context.Context
+	controlCancel context.CancelFunc
 
 	mu     sync.Mutex
 	tokens map[string]SessionProfile
 }
 
 func New(cfg Config) *Server {
-	return &Server{
-		cfg:    cfg,
-		store:  bridgestate.New(cfg.BridgeStateFile),
-		http:   &http.Client{Timeout: 1500 * time.Millisecond},
-		tokens: make(map[string]SessionProfile),
+	return newServer(cfg, nil)
+}
+
+func newServer(cfg Config, control *batchcontrol.Service) *Server {
+	controlCtx, controlCancel := context.WithCancel(context.Background())
+	server := &Server{
+		cfg:           cfg,
+		store:         bridgestate.New(cfg.BridgeStateFile),
+		http:          &http.Client{Timeout: 1500 * time.Millisecond},
+		controlCtx:    controlCtx,
+		controlCancel: controlCancel,
+		tokens:        make(map[string]SessionProfile),
+	}
+	if control != nil {
+		server.control = control
+	} else {
+		server.control = server.newControlService()
+	}
+	return server
+}
+
+func (s *Server) Close() {
+	if s == nil {
+		return
+	}
+	if s.control != nil {
+		s.control.StopAll()
+	}
+	if s.controlCancel != nil {
+		s.controlCancel()
 	}
 }
 
@@ -55,6 +94,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/mobile/profile", s.handleProfile)
 	mux.HandleFunc("/v1/mobile/monitor/state", s.handleMonitorState)
 	mux.HandleFunc("/v1/mobile/monitor/stream", s.handleMonitorStream)
+	mux.HandleFunc("/v1/mobile/items", s.handleItems)
+	mux.HandleFunc("/v1/mobile/items/", s.handleItemRoutes)
+	mux.HandleFunc("/v1/mobile/batch/state", s.handleBatchState)
+	mux.HandleFunc("/v1/mobile/batch/start", s.handleBatchStart)
+	mux.HandleFunc("/v1/mobile/batch/stop", s.handleBatchStop)
 	return mux
 }
 
@@ -76,17 +120,19 @@ func (s *Server) handleHandshake(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":            true,
-		"service":       "mobileapi",
-		"app":           "gscale-zebra",
-		"server_name":   s.cfg.ServerName,
-		"server_ref":    s.currentProfile().Ref,
-		"display_name":  s.currentProfile().DisplayName,
-		"role":          s.currentProfile().Role,
-		"phone":         s.currentProfile().Phone,
-		"monitor_path":  "/v1/mobile/monitor/state",
-		"profile_path":  "/v1/mobile/profile",
-		"requires_auth": false,
+		"ok":               true,
+		"service":          "mobileapi",
+		"app":              "gscale-zebra",
+		"server_name":      s.cfg.ServerName,
+		"server_ref":       s.currentProfile().Ref,
+		"display_name":     s.currentProfile().DisplayName,
+		"role":             s.currentProfile().Role,
+		"phone":            s.currentProfile().Phone,
+		"monitor_path":     "/v1/mobile/monitor/state",
+		"profile_path":     "/v1/mobile/profile",
+		"items_path":       "/v1/mobile/items",
+		"batch_state_path": "/v1/mobile/batch/state",
+		"requires_auth":    false,
 	})
 }
 
@@ -307,6 +353,169 @@ func (s *Server) fetchPrinterTrace() (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	items, err := s.control.SearchItems(r.Context(), strings.TrimSpace(r.URL.Query().Get("query")), parseLimit(r, 50))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"items": items,
+	})
+}
+
+func (s *Server) handleItemRoutes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	itemCode, ok := extractItemCodeFromWarehousesPath(r.URL.Path)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found"})
+		return
+	}
+	stocks, err := s.control.SearchItemWarehouses(r.Context(), itemCode, strings.TrimSpace(r.URL.Query().Get("query")), parseLimit(r, 50))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"item_code":  itemCode,
+		"warehouses": stocks,
+	})
+}
+
+func (s *Server) handleBatchState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	batch, err := s.readBatchSnapshot()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"batch": batch,
+	})
+}
+
+func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	var req batchStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	selection := workflow.Selection{
+		ItemCode:  strings.TrimSpace(req.ItemCode),
+		ItemName:  strings.TrimSpace(req.ItemName),
+		Warehouse: strings.TrimSpace(req.Warehouse),
+	}.Normalize()
+	if selection.ItemCode == "" || selection.Warehouse == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "item_code_and_warehouse_required"})
+		return
+	}
+	if s.control.HasActiveBatch(mobileBatchOwnerID) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_already_active"})
+		return
+	}
+	if _, ok := s.control.OtherActiveBatchOwner(mobileBatchOwnerID); ok {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_active_elsewhere"})
+		return
+	}
+	if !s.control.Start(s.controlCtx, mobileBatchOwnerID, selection, workflow.Hooks{}) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_start_failed"})
+		return
+	}
+	batch, err := s.readBatchSnapshot()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"batch": batch,
+	})
+}
+
+func (s *Server) handleBatchStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if !s.control.Stop(mobileBatchOwnerID) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_not_active"})
+		return
+	}
+	batch, err := s.readBatchSnapshot()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"batch": batch,
+	})
+}
+
+func (s *Server) readBatchSnapshot() (bridgestate.BatchSnapshot, error) {
+	snap, err := s.store.Read()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return bridgestate.BatchSnapshot{}, nil
+		}
+		return bridgestate.BatchSnapshot{}, err
+	}
+	return snap.Batch, nil
+}
+
+func extractItemCodeFromWarehousesPath(path string) (string, bool) {
+	const prefix = "/v1/mobile/items/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) != "warehouses" {
+		return "", false
+	}
+	itemCode, err := url.PathUnescape(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return "", false
+	}
+	itemCode = strings.TrimSpace(itemCode)
+	if itemCode == "" {
+		return "", false
+	}
+	return itemCode, true
+}
+
+func parseLimit(r *http.Request, fallback int) int {
+	limitText := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if limitText == "" {
+		return fallback
+	}
+	limit, err := strconv.Atoi(limitText)
+	if err != nil || limit <= 0 {
+		return fallback
+	}
+	if limit > 50 {
+		return 50
+	}
+	return limit
 }
 
 func (s *Server) authorize(r *http.Request) (SessionProfile, bool) {

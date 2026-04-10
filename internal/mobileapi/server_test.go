@@ -4,9 +4,13 @@ import (
 	bridgestate "bridge/state"
 	"bufio"
 	"bytes"
+	"context"
+	"core/batchcontrol"
+	"core/workflow"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 )
@@ -210,4 +214,156 @@ func TestMonitorStreamReturnsInitialSnapshotEvent(t *testing.T) {
 	}
 
 	t.Fatalf("stream did not include initial snapshot event")
+}
+
+func TestItemsEndpointReturnsCatalogResults(t *testing.T) {
+	t.Parallel()
+
+	server := newServer(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+	}, batchcontrol.New(batchcontrol.Dependencies{
+		Catalog: stubCatalog{
+			items: []batchcontrol.Item{
+				{ItemCode: "ITEM-001", ItemName: "Green Tea"},
+			},
+		},
+	}))
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/mobile/items?query=tea", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("items status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"item_code":"ITEM-001"`)) {
+		t.Fatalf("items body = %s", rec.Body.String())
+	}
+}
+
+func TestWarehousesEndpointReturnsCatalogResults(t *testing.T) {
+	t.Parallel()
+
+	server := newServer(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+	}, batchcontrol.New(batchcontrol.Dependencies{
+		Catalog: stubCatalog{
+			warehouses: []batchcontrol.WarehouseStock{
+				{Warehouse: "Stores - A", ActualQty: 12.5},
+			},
+		},
+	}))
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/mobile/items/ITEM-001/warehouses?query=stores", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("warehouses status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"warehouse":"Stores - A"`)) {
+		t.Fatalf("warehouses body = %s", rec.Body.String())
+	}
+}
+
+func TestBatchStartStopEndpoints(t *testing.T) {
+	t.Parallel()
+
+	stateFile := t.TempDir() + "/bridge_state.json"
+	store := bridgestate.New(stateFile)
+	writer := bridgeBatchStateWriter{store: store}
+	runner := &blockingRunner{
+		started: make(chan struct{}, 1),
+		stopped: make(chan struct{}, 1),
+	}
+	server := newServer(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: stateFile,
+	}, batchcontrol.New(batchcontrol.Dependencies{
+		Catalog:    stubCatalog{},
+		BatchState: writer,
+		Runner:     runner,
+	}))
+	defer server.Close()
+
+	startReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea","warehouse":"Stores - A"}`))
+	startRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(startRec, startReq)
+
+	if startRec.Code != http.StatusOK {
+		t.Fatalf("start status = %d body=%s", startRec.Code, startRec.Body.String())
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not start")
+	}
+
+	stateReq := httptest.NewRequest(http.MethodGet, "/v1/mobile/batch/state", nil)
+	stateRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(stateRec, stateReq)
+	if stateRec.Code != http.StatusOK {
+		t.Fatalf("state status = %d body=%s", stateRec.Code, stateRec.Body.String())
+	}
+	if !bytes.Contains(stateRec.Body.Bytes(), []byte(`"active":true`)) {
+		t.Fatalf("state body = %s", stateRec.Body.String())
+	}
+
+	stopReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/stop", nil)
+	stopRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(stopRec, stopReq)
+	if stopRec.Code != http.StatusOK {
+		t.Fatalf("stop status = %d body=%s", stopRec.Code, stopRec.Body.String())
+	}
+
+	select {
+	case <-runner.stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not stop")
+	}
+
+	snap, err := store.Read()
+	if err != nil {
+		t.Fatalf("read bridge after stop: %v", err)
+	}
+	if snap.Batch.Active {
+		t.Fatalf("batch should be inactive after stop: %+v", snap.Batch)
+	}
+}
+
+type stubCatalog struct {
+	items      []batchcontrol.Item
+	warehouses []batchcontrol.WarehouseStock
+}
+
+func (s stubCatalog) CheckConnection(context.Context) (string, error) {
+	return "ERP DB Reader", nil
+}
+
+func (s stubCatalog) SearchItems(context.Context, string, int) ([]batchcontrol.Item, error) {
+	return slices.Clone(s.items), nil
+}
+
+func (s stubCatalog) SearchItemWarehouses(context.Context, string, string, int) ([]batchcontrol.WarehouseStock, error) {
+	return slices.Clone(s.warehouses), nil
+}
+
+type blockingRunner struct {
+	started chan struct{}
+	stopped chan struct{}
+}
+
+func (r *blockingRunner) Run(ctx context.Context, selection workflow.Selection, hooks workflow.Hooks) error {
+	if r.started != nil {
+		r.started <- struct{}{}
+	}
+	<-ctx.Done()
+	if r.stopped != nil {
+		r.stopped <- struct{}{}
+	}
+	return nil
 }
