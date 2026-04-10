@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"bot/internal/erp"
 	"bot/internal/telegram"
+	"core/batchcontrol"
 )
 
 const warehouseInlinePrefix = "wh:"
@@ -86,7 +86,7 @@ func HandleItemSelected(ctx context.Context, deps Deps, chatID int64, itemCode, 
 }
 
 func HandleWarehouseInlineQuery(ctx context.Context, deps Deps, q telegram.InlineQuery, request warehouseQueryRequest) error {
-	stocks, err := deps.ERP.SearchItemWarehouses(ctx, request.ItemCode, request.Query, 50)
+	stocks, err := deps.Control.SearchItemWarehouses(ctx, request.ItemCode, request.Query, 50)
 	if err != nil {
 		results := []telegram.InlineQueryResultArticle{
 			{
@@ -160,7 +160,7 @@ func buildWarehouseInlineSeed(itemCode string) string {
 	return warehouseInlinePrefix + encoded + ":" + warehouseDefaultQuery
 }
 
-func buildWarehouseResults(itemCode string, stocks []erp.WarehouseStock) []telegram.InlineQueryResultArticle {
+func buildWarehouseResults(itemCode string, stocks []batchcontrol.WarehouseStock) []telegram.InlineQueryResultArticle {
 	results := make([]telegram.InlineQueryResultArticle, 0, len(stocks))
 	for i, stock := range stocks {
 		warehouse := strings.TrimSpace(stock.Warehouse)

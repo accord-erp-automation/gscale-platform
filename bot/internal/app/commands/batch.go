@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"bot/internal/erp"
 	"bot/internal/telegram"
+	"core/batchcontrol"
 )
 
 const inlineDefaultQuery = "*"
@@ -41,7 +41,7 @@ func HandleInlineQuery(ctx context.Context, deps Deps, q telegram.InlineQuery) e
 
 func HandleBatchInlineQuery(ctx context.Context, deps Deps, q telegram.InlineQuery) error {
 	query := normalizeInlineQuery(q.Query)
-	items, err := deps.ERP.SearchItems(ctx, query, 50)
+	items, err := deps.Control.SearchItems(ctx, query, 50)
 	if err != nil {
 		results := []telegram.InlineQueryResultArticle{
 			{
@@ -75,7 +75,7 @@ func HandleBatchInlineQuery(ctx context.Context, deps Deps, q telegram.InlineQue
 	return deps.TG.AnswerInlineQuery(ctx, q.ID, results, 1)
 }
 
-func buildItemResults(items []erp.Item) []telegram.InlineQueryResultArticle {
+func buildItemResults(items []batchcontrol.Item) []telegram.InlineQueryResultArticle {
 	results := make([]telegram.InlineQueryResultArticle, 0, len(items))
 	for i, it := range items {
 		code := strings.TrimSpace(it.ItemCode)

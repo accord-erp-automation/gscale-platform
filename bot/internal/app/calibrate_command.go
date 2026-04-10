@@ -79,9 +79,10 @@ func (a *App) resolveCalibrateDevice(preferred string) string {
 }
 
 func (a *App) hasAnyBatchSession() bool {
-	a.batchMu.Lock()
-	defer a.batchMu.Unlock()
-	return len(a.batchByChat) > 0
+	if a == nil || a.control == nil {
+		return false
+	}
+	return a.control.ActiveBatch().Active
 }
 
 func parseCalibrateOptions(text string) (calibrateOptions, error) {

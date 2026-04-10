@@ -9,7 +9,7 @@ import (
 )
 
 func HandleStart(ctx context.Context, deps Deps, msg telegram.Message) (int64, error) {
-	user, err := deps.ERP.CheckConnection(ctx)
+	user, err := deps.Control.CheckConnection(ctx)
 	if err != nil {
 		return 0, deps.TG.SendMessage(ctx, msg.Chat.ID, "ERPNext ulanishi xato: "+err.Error())
 	}

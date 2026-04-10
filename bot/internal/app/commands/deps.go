@@ -3,8 +3,8 @@ package commands
 import (
 	"context"
 
-	"bot/internal/erp"
 	"bot/internal/telegram"
+	"core/batchcontrol"
 )
 
 type TelegramService interface {
@@ -15,13 +15,13 @@ type TelegramService interface {
 	AnswerCallbackQuery(ctx context.Context, callbackQueryID, text string) error
 }
 
-type ERPService interface {
+type ControlService interface {
 	CheckConnection(ctx context.Context) (string, error)
-	SearchItems(ctx context.Context, query string, limit int) ([]erp.Item, error)
-	SearchItemWarehouses(ctx context.Context, itemCode, query string, limit int) ([]erp.WarehouseStock, error)
+	SearchItems(ctx context.Context, query string, limit int) ([]batchcontrol.Item, error)
+	SearchItemWarehouses(ctx context.Context, itemCode, query string, limit int) ([]batchcontrol.WarehouseStock, error)
 }
 
 type Deps struct {
-	TG  TelegramService
-	ERP ERPService
+	TG      TelegramService
+	Control ControlService
 }

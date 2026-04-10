@@ -2,19 +2,12 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"bot/internal/app/commands"
-	"bot/internal/erp"
 	"bot/internal/telegram"
-)
-
-const (
-	printResultTimeout      = 12 * time.Second
-	printResultPollInterval = 120 * time.Millisecond
+	"core/workflow"
 )
 
 func (a *App) handleCallbackQuery(ctx context.Context, q telegram.CallbackQuery) error {
@@ -43,7 +36,7 @@ func (a *App) handleBatchChangeItemCallback(ctx context.Context, q telegram.Call
 	}
 
 	chatID := q.Message.Chat.ID
-	_ = a.stopBatchSession(chatID)
+	_ = a.control.Stop(chatID)
 	a.setBatchChangePending(chatID, q.Message.MessageID)
 
 	pausedText := formatPausedStatus(q.Message.Text)
@@ -71,7 +64,7 @@ func (a *App) handleBatchStopCallback(ctx context.Context, q telegram.CallbackQu
 
 	chatID := q.Message.Chat.ID
 	a.clearBatchChangePending(chatID)
-	stopped := a.stopBatchSession(chatID)
+	stopped := a.control.Stop(chatID)
 	if stopped {
 		if err := a.tg.AnswerCallbackQuery(ctx, q.ID, "Batch to'xtatildi"); err != nil {
 			return err
@@ -99,10 +92,10 @@ func (a *App) handleBatchStartCallback(ctx context.Context, q telegram.CallbackQ
 		}
 		return a.tg.SendMessage(ctx, chatID, "Avval /batch orqali item va ombor tanlang.")
 	}
-	if a.hasBatchSession(chatID) {
+	if a.control.HasActiveBatch(chatID) {
 		return a.tg.AnswerCallbackQuery(ctx, q.ID, "Batch allaqachon ishlayapti")
 	}
-	if _, ok := a.otherActiveBatchOwner(chatID); ok {
+	if _, ok := a.control.OtherActiveBatchOwner(chatID); ok {
 		return a.tg.AnswerCallbackQuery(ctx, q.ID, "Batch boshqa chatda ishlayapti")
 	}
 
@@ -115,171 +108,17 @@ func (a *App) startMaterialReceiptBatch(ctx context.Context, chatID int64, sel S
 	initial := formatBatchStatusText(sel, 0, "", 0, "", "", "", strings.TrimSpace(note))
 	statusMessageID = a.upsertBatchStatusMessage(ctx, chatID, statusMessageID, initial)
 
-	a.startBatchSession(ctx, chatID, func(batchCtx context.Context) {
-		a.runMaterialReceiptBatchLoop(batchCtx, chatID, sel, statusMessageID)
+	a.control.Start(ctx, chatID, toWorkflowSelection(sel), workflow.Hooks{
+		Progress: func(progress workflow.Progress) {
+			statusMessageID = a.upsertBatchStatusMessage(
+				ctx,
+				chatID,
+				statusMessageID,
+				formatBatchWorkflowProgress(progress),
+			)
+		},
 	})
 	return statusMessageID
-}
-
-func (a *App) runMaterialReceiptBatchLoop(ctx context.Context, chatID int64, sel SelectedContext, statusMessageID int64) {
-	draftCount := 0
-	// Status matnida har safar oxirgi muvaffaqiyatli draftni ko'rsatamiz.
-	// Shunda EPC xatosidan keyin "Oxirgi QTY: 0.000 kg" ko'rinib qolmaydi.
-	lastDraftName := ""
-	lastDraftQty := 0.0
-	lastDraftUnit := ""
-	lastDraftEPC := ""
-	lastDraftVerify := "UNKNOWN"
-
-	for {
-		reading, err := a.qtyReader.WaitStablePositiveReading(ctx, 35*time.Second, 220*time.Millisecond)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return
-			}
-			if strings.Contains(strings.ToLower(err.Error()), "timeout") {
-				continue
-			}
-			statusMessageID = a.upsertBatchStatusMessage(
-				ctx,
-				chatID,
-				statusMessageID,
-				formatBatchStatusText(sel, draftCount, lastDraftName, lastDraftQty, lastDraftUnit, lastDraftEPC, lastDraftVerify, "Scale xato: "+err.Error()),
-			)
-			continue
-		}
-		a.logBatch.Printf(
-			"batch stable qty: chat=%d item=%s warehouse=%s qty=%.3f unit=%s scale_at=%s",
-			chatID,
-			strings.TrimSpace(sel.ItemCode),
-			strings.TrimSpace(sel.Warehouse),
-			reading.Qty,
-			strings.TrimSpace(reading.Unit),
-			reading.UpdatedAt.Format(time.RFC3339Nano),
-		)
-
-		epc, draft, err := createDraftWithFreshEPC(
-			func() string {
-				return a.epcGenerator.Next(reading.UpdatedAt)
-			},
-			func(epc string) (erp.StockEntryDraft, error) {
-				return a.erp.CreateMaterialReceiptDraft(ctx, erp.MaterialReceiptDraftInput{
-					ItemCode:  sel.ItemCode,
-					Warehouse: sel.Warehouse,
-					Qty:       reading.Qty,
-					Barcode:   epc,
-				})
-			},
-		)
-		if err != nil {
-			a.logBatch.Printf("batch draft create error: chat=%d qty=%.3f epc=%s err=%v", chatID, reading.Qty, epc, err)
-			statusMessageID = a.upsertBatchStatusMessage(
-				ctx,
-				chatID,
-				statusMessageID,
-				formatBatchStatusText(sel, draftCount, lastDraftName, lastDraftQty, lastDraftUnit, lastDraftEPC, lastDraftVerify, "ERP xato: "+err.Error()),
-			)
-			continue
-		}
-		a.logBatch.Printf("batch draft created: chat=%d draft=%s qty=%.3f epc=%s", chatID, strings.TrimSpace(draft.Name), draft.Qty, epc)
-		a.setPrintRequest(epc, draft.Qty, reading.Unit, sel)
-
-		note := "Batch davom etmoqda | Print navbatga qo'yildi"
-		statusMessageID = a.upsertBatchStatusMessage(
-			ctx,
-			chatID,
-			statusMessageID,
-			formatBatchStatusText(sel, draftCount, lastDraftName, lastDraftQty, lastDraftUnit, lastDraftEPC, lastDraftVerify, note),
-		)
-
-		printResult, err := a.qtyReader.WaitPrintRequestResult(ctx, printResultTimeout, printResultPollInterval, epc)
-		a.clearPrintRequest()
-		if err != nil {
-			a.logBatch.Printf("batch print result error: chat=%d draft=%s epc=%s err=%v", chatID, strings.TrimSpace(draft.Name), epc, err)
-			deleteErr := a.erp.DeleteStockEntryDraft(ctx, draft.Name)
-			note := "Print xato: " + err.Error() + " | Draft delete qilindi"
-			if deleteErr != nil {
-				note = "Print xato: " + err.Error() + " | Draft delete xato: " + deleteErr.Error()
-			}
-			statusMessageID = a.upsertBatchStatusMessage(
-				ctx,
-				chatID,
-				statusMessageID,
-				formatBatchStatusText(sel, draftCount, lastDraftName, lastDraftQty, lastDraftUnit, lastDraftEPC, lastDraftVerify, note),
-			)
-			if err := a.qtyReader.WaitForNextCycle(ctx, 10*time.Minute, 220*time.Millisecond, reading.Qty); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return
-				}
-			}
-			continue
-		}
-
-		if printResult.Status != "done" {
-			a.logBatch.Printf("batch print failed: chat=%d draft=%s epc=%s status=%s err=%s", chatID, strings.TrimSpace(draft.Name), epc, printResult.Status, printResult.Error)
-			deleteErr := a.erp.DeleteStockEntryDraft(ctx, draft.Name)
-			note := "Print xato"
-			if strings.TrimSpace(printResult.Error) != "" {
-				note += ": " + strings.TrimSpace(printResult.Error)
-			}
-			note += " | Draft delete qilindi"
-			if deleteErr != nil {
-				note = note + " | Delete xato: " + deleteErr.Error()
-			}
-			statusMessageID = a.upsertBatchStatusMessage(
-				ctx,
-				chatID,
-				statusMessageID,
-				formatBatchStatusText(sel, draftCount, lastDraftName, lastDraftQty, lastDraftUnit, lastDraftEPC, lastDraftVerify, note),
-			)
-			if err := a.qtyReader.WaitForNextCycle(ctx, 10*time.Minute, 220*time.Millisecond, reading.Qty); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return
-				}
-			}
-			continue
-		}
-
-		if err := a.erp.SubmitStockEntryDraft(ctx, draft.Name); err != nil {
-			a.logBatch.Printf("batch draft submit error: chat=%d draft=%s epc=%s err=%v", chatID, strings.TrimSpace(draft.Name), epc, err)
-			statusMessageID = a.upsertBatchStatusMessage(
-				ctx,
-				chatID,
-				statusMessageID,
-				formatBatchStatusText(sel, draftCount, lastDraftName, lastDraftQty, lastDraftUnit, lastDraftEPC, lastDraftVerify, "Submit xato: "+err.Error()),
-			)
-			if err := a.qtyReader.WaitForNextCycle(ctx, 10*time.Minute, 220*time.Millisecond, reading.Qty); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return
-				}
-			}
-			continue
-		}
-
-		a.epcHistory.Add(epc)
-		draftCount++
-		lastDraftName = strings.TrimSpace(draft.Name)
-		lastDraftQty = draft.Qty
-		lastDraftUnit = reading.Unit
-		lastDraftEPC = epc
-		lastDraftVerify = "OK"
-
-		for {
-			err := a.qtyReader.WaitForNextCycle(ctx, 10*time.Minute, 220*time.Millisecond, draft.Qty)
-			if err == nil {
-				break
-			}
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return
-			}
-			statusMessageID = a.upsertBatchStatusMessage(
-				ctx,
-				chatID,
-				statusMessageID,
-				formatBatchStatusText(sel, draftCount, lastDraftName, lastDraftQty, lastDraftUnit, lastDraftEPC, lastDraftVerify, "Keyingi mahsulotni qo'ying (yoki 0 kg)"),
-			)
-		}
-	}
 }
 
 func (a *App) upsertBatchStatusMessage(ctx context.Context, chatID, messageID int64, text string) int64 {

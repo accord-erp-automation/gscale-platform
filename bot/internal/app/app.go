@@ -1,9 +1,7 @@
 package app
 
 import (
-	"context"
 	"log"
-	"sync"
 
 	"bot/internal/app/commands"
 	"bot/internal/batchstate"
@@ -12,6 +10,7 @@ import (
 	"bot/internal/erp"
 	"bot/internal/telegram"
 	corepkg "core"
+	"core/batchcontrol"
 )
 
 type App struct {
@@ -27,21 +26,13 @@ type App struct {
 	logBatch                 *log.Logger
 	logCallback              *log.Logger
 	logCleanup               *log.Logger
+	control                  *batchcontrol.Service
 	startInfoMsgByChat       map[int64]int64
 	batchPromptMsgByChat     map[int64]int64
 	warehousePromptMsgByChat map[int64]int64
 	selectionByChat          map[int64]SelectedContext
 	itemChoiceByChat         map[int64]itemChoice
 	batchChangeMsgByChat     map[int64]int64
-
-	batchMu     sync.Mutex
-	batchNextID int64
-	batchByChat map[int64]batchSession
-}
-
-type batchSession struct {
-	id     int64
-	cancel context.CancelFunc
 }
 
 type SelectedContext struct {
@@ -71,7 +62,7 @@ func New(cfg config.Config, logger *log.Logger, runLogger *log.Logger, batchLogg
 	if cleanupLogger == nil {
 		cleanupLogger = logger
 	}
-	return &App{
+	app := &App{
 		cfg:                      cfg,
 		tg:                       telegram.New(cfg.TelegramBotToken),
 		erp:                      erp.NewWithReadURL(cfg.ERPURL, cfg.ERPAPIKey, cfg.ERPAPISecret, cfg.ERPReadURL),
@@ -90,10 +81,11 @@ func New(cfg config.Config, logger *log.Logger, runLogger *log.Logger, batchLogg
 		selectionByChat:          make(map[int64]SelectedContext),
 		itemChoiceByChat:         make(map[int64]itemChoice),
 		batchChangeMsgByChat:     make(map[int64]int64),
-		batchByChat:              make(map[int64]batchSession),
 	}
+	app.control = app.newControlService()
+	return app
 }
 
 func (a *App) deps() commands.Deps {
-	return commands.Deps{TG: a.tg, ERP: a.erp}
+	return commands.Deps{TG: a.tg, Control: a.control}
 }
