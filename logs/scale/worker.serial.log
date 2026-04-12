@@ -1,3 +1,0 @@
-[worker.serial] 2026/04/09 11:00:10.919096 start: device=/dev/ttyUSB0 baud=9600 unit=kg
-[worker.serial] 2026/04/09 11:00:10.919252 open error: open /dev/ttyUSB0: no such file or directory
-[worker.serial] 2026/04/09 11:00:11.820002 open error: open /dev/ttyUSB0: no such file or directory
