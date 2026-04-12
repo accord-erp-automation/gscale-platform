@@ -1,4 +1,4 @@
-[main] 2026/04/09 11:00:10.918928 scale started
-[main] 2026/04/09 11:00:10.918969 workflow logs dir: /home/wikki/storage/local.git/gscale-zebra/logs/scale
-[main] 2026/04/09 11:00:10.919128 serial reader started: device=/dev/ttyUSB0 baud=9600
-[main] 2026/04/09 11:00:10.919178 zebra monitor started: device=/dev/usb/lp0 interval=900ms
+[main] 2026/04/12 16:26:50.615992 scale started
+[main] 2026/04/12 16:26:50.616262 workflow logs dir: /Volumes/Samsung990P/local.git/gscale-zebra/logs/scale
+[main] 2026/04/12 16:26:50.617083 serial detect error: serial device topilmadi (/dev/ttyUSB* yoki /dev/ttyACM*)
+[main] 2026/04/12 16:26:50.617387 bridge reader started: url=http://127.0.0.1:18000/api/v1/scale

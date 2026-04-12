@@ -1,4 +1,0 @@
-[worker.zebra_monitor] 2026/04/09 11:00:10.919155 start: preferred_device=/dev/usb/lp0 interval=900ms
-[worker.zebra_monitor] 2026/04/09 11:00:10.919359 status: connected=false device= verify=- error=zebra: USB printer topilmadi
-[worker.zebra_monitor] 2026/04/09 11:00:11.820053 status: connected=false device= verify=- error=zebra: USB printer topilmadi
-[worker.zebra_monitor] 2026/04/09 11:00:12.048712 stop: context done
