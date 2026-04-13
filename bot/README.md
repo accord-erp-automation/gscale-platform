@@ -52,14 +52,18 @@ Bot `batch` va `print_request` bo'limlarini shu faylga yozadi, `scale` esa shu h
 Majburiy:
 
 - `TELEGRAM_BOT_TOKEN`
+
+Core runtime config alohida `../config/core.env` ichidan olinadi:
+
 - `ERP_URL`
 - `ERP_API_KEY`
 - `ERP_API_SECRET`
+- `ERP_READ_URL`
+- `BRIDGE_STATE_FILE`
 
 Ixtiyoriy/asosiy:
 
-- `ERP_READ_URL` (`item`, `warehouse`, `stock_uom`, `company` kabi read so'rovlarni DB reader service'ga yuboradi)
-- `BRIDGE_STATE_FILE` (default: `/tmp/gscale-zebra/bridge_state.json`)
+- `CORE_ENV_PATH` (agar `../config/core.env` o'rniga boshqa core config yo'lini ishlatmoqchi bo'lsangiz)
 
 ## Loglar
 

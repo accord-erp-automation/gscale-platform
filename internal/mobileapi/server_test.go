@@ -8,9 +8,11 @@ import (
 	"core/batchcontrol"
 	"core/workflow"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -283,6 +285,9 @@ func TestBatchStartStopEndpoints(t *testing.T) {
 	server := newServer(Config{
 		ServerName:      "gscale-dev",
 		BridgeStateFile: stateFile,
+		ERPURL:          "http://localhost:8000",
+		ERPAPIKey:       "key-123",
+		ERPAPISecret:    "secret-123",
 	}, batchcontrol.New(batchcontrol.Dependencies{
 		Catalog:    stubCatalog{},
 		BatchState: writer,
@@ -332,6 +337,202 @@ func TestBatchStartStopEndpoints(t *testing.T) {
 	}
 	if snap.Batch.Active {
 		t.Fatalf("batch should be inactive after stop: %+v", snap.Batch)
+	}
+}
+
+func TestSetupStatusEndpoint(t *testing.T) {
+	t.Parallel()
+
+	server := New(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+		ERPReadURL:      "http://127.0.0.1:8090",
+		ERPURL:          "http://localhost:8000",
+		ERPAPIKey:       "key-123",
+		ERPAPISecret:    "secret-123",
+	})
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/mobile/setup/status", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_write_configured":true`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_read_configured":true`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_url":"http://localhost:8000"`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_read_url":"http://127.0.0.1:8090"`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestBatchStartFailsFastWhenERPNotConfigured(t *testing.T) {
+	t.Parallel()
+
+	server := newServer(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+	}, batchcontrol.New(batchcontrol.Dependencies{
+		Catalog:    stubCatalog{},
+		BatchState: bridgeBatchStateWriter{store: bridgestate.New(t.TempDir() + "/bridge_state.json")},
+		Runner:     &blockingRunner{},
+	}))
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea","warehouse":"Stores - A"}`))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_not_configured"`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestSetupERPStoresValidatedConfig(t *testing.T) {
+	t.Parallel()
+
+	setupPath := t.TempDir() + "/mobile_setup.json"
+	readService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/handshake":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"service":"gscale_erp_read"}`))
+		case "/healthz":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer readService.Close()
+	server := New(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+		SetupFile:       setupPath,
+	})
+	server.validateERPSetup = func(context.Context, ERPSetup) error { return nil }
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mobile/setup/erp", bytes.NewBufferString(`{"erp_url":"http://localhost:8000","erp_read_url":"`+readService.URL+`","erp_api_key":"key-123","erp_api_secret":"secret-123"}`))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_write_configured":true`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+
+	saved, err := loadERPSetup(setupPath)
+	if err != nil {
+		t.Fatalf("loadERPSetup: %v", err)
+	}
+	if saved.ERPURL != "http://localhost:8000" {
+		t.Fatalf("saved ERPURL = %q", saved.ERPURL)
+	}
+	if saved.ERPReadURL != readService.URL {
+		t.Fatalf("saved ERPReadURL = %q", saved.ERPReadURL)
+	}
+	if server.cfg.ERPAPIKey != "key-123" {
+		t.Fatalf("server cfg ERPAPIKey = %q", server.cfg.ERPAPIKey)
+	}
+	if server.cfg.ERPReadURL != readService.URL {
+		t.Fatalf("server cfg ERPReadURL = %q", server.cfg.ERPReadURL)
+	}
+}
+
+func TestSetupERPRejectsInvalidConfig(t *testing.T) {
+	t.Parallel()
+
+	setupPath := t.TempDir() + "/mobile_setup.json"
+	server := New(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+		SetupFile:       setupPath,
+	})
+	server.validateERPSetup = func(context.Context, ERPSetup) error { return errors.New("bad credentials") }
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mobile/setup/erp", bytes.NewBufferString(`{"erp_url":"http://localhost:8000","erp_api_key":"key-123","erp_api_secret":"secret-123"}`))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_validation_failed"`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	got, err := loadERPSetup(setupPath)
+	if err != nil {
+		t.Fatalf("loadERPSetup: %v", err)
+	}
+	if got.ERPURL != "" || got.ERPAPIKey != "" || got.ERPAPISecret != "" {
+		t.Fatalf("setup should stay empty after validation failure: %#v", got)
+	}
+}
+
+func TestSetupERPCanBeCleared(t *testing.T) {
+	t.Parallel()
+
+	setupPath := t.TempDir() + "/mobile_setup.json"
+	if err := saveERPSetup(setupPath, ERPSetup{
+		ERPURL:       "http://localhost:8000",
+		ERPReadURL:   "http://127.0.0.1:8090",
+		ERPAPIKey:    "key-123",
+		ERPAPISecret: "secret-123",
+	}); err != nil {
+		t.Fatalf("saveERPSetup: %v", err)
+	}
+
+	server := New(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+		SetupFile:       setupPath,
+		ERPURL:          "http://localhost:8000",
+		ERPReadURL:      "http://127.0.0.1:8090",
+		ERPAPIKey:       "key-123",
+		ERPAPISecret:    "secret-123",
+	})
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/mobile/setup/erp", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_write_configured":false`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	got, err := loadERPSetup(setupPath)
+	if err != nil {
+		t.Fatalf("loadERPSetup: %v", err)
+	}
+	if got.ERPURL != "" || got.ERPAPIKey != "" || got.ERPAPISecret != "" {
+		t.Fatalf("setup should be cleared: %#v", got)
+	}
+	if got.ERPReadURL != "" {
+		t.Fatalf("setup read URL should be cleared: %#v", got)
+	}
+	if server.cfg.HasERPWriteConfig() {
+		t.Fatal("server cfg should be cleared")
+	}
+	if strings.TrimSpace(server.cfg.ERPReadURL) != "" {
+		t.Fatalf("server cfg ERPReadURL should be cleared: %q", server.cfg.ERPReadURL)
 	}
 }
 

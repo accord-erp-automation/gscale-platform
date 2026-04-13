@@ -4,12 +4,26 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"core/runtimecfg"
 )
 
 func TestLoadSupportsColonAndAliasKeys(t *testing.T) {
 	d := t.TempDir()
 	p := filepath.Join(d, ".env")
-	data := "url:https://erp.accord.uz\napi key:abc\napi secret:def\ntelegram bot token:123:XYZ\n"
+	corePath := filepath.Join(d, "core.env")
+	if err := runtimecfg.Save(corePath, runtimecfg.Config{
+		ERPURL:          "https://erp.accord.uz",
+		ERPReadURL:      "",
+		ERPAPIKey:       "abc",
+		ERPAPISecret:    "def",
+		BridgeStateFile: runtimecfg.DefaultBridgeStateFile,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CORE_ENV_PATH", corePath)
+
+	data := "telegram bot token:123:XYZ\n"
 	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +44,7 @@ func TestLoadSupportsColonAndAliasKeys(t *testing.T) {
 	if cfg.TelegramBotToken != "123:XYZ" {
 		t.Fatalf("TelegramBotToken mismatch: %q", cfg.TelegramBotToken)
 	}
-	if cfg.BridgeStateFile != defaultBridgeStateFile {
+	if cfg.BridgeStateFile != runtimecfg.DefaultBridgeStateFile {
 		t.Fatalf("BridgeStateFile mismatch: %q", cfg.BridgeStateFile)
 	}
 }
@@ -38,13 +52,20 @@ func TestLoadSupportsColonAndAliasKeys(t *testing.T) {
 func TestLoadSupportsBridgeOverride(t *testing.T) {
 	d := t.TempDir()
 	p := filepath.Join(d, ".env")
+	corePath := filepath.Join(d, "core.env")
+	if err := runtimecfg.Save(corePath, runtimecfg.Config{
+		ERPURL:          "https://erp.accord.uz",
+		ERPReadURL:      "http://127.0.0.1:8090",
+		ERPAPIKey:       "abc",
+		ERPAPISecret:    "def",
+		BridgeStateFile: "/tmp/custom-bridge.json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CORE_ENV_PATH", corePath)
+
 	data := "\n" +
-		"TELEGRAM_BOT_TOKEN=123:XYZ\n" +
-		"ERP_URL=https://erp.accord.uz\n" +
-		"ERP_READ_URL=http://127.0.0.1:8090\n" +
-		"ERP_API_KEY=abc\n" +
-		"ERP_API_SECRET=def\n" +
-		"BRIDGE_STATE_FILE=/tmp/custom-bridge.json\n"
+		"TELEGRAM_BOT_TOKEN=123:XYZ\n"
 	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}

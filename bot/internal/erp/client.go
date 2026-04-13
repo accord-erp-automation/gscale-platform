@@ -2,6 +2,7 @@ package erp
 
 import (
 	"context"
+	"core/erpread"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -84,7 +85,19 @@ func NewWithReadURL(baseURL, apiKey, apiSecret, readURL string) *Client {
 	}
 }
 
+func (c *Client) resolveReadURL(ctx context.Context) {
+	if c == nil || strings.TrimSpace(c.readURL) != "" || strings.TrimSpace(c.baseURL) == "" {
+		return
+	}
+	result, err := erpread.Resolve(ctx, c.http, c.baseURL, "")
+	if err != nil {
+		return
+	}
+	c.readURL = strings.TrimRight(strings.TrimSpace(result.BaseURL), "/")
+}
+
 func (c *Client) CheckConnection(ctx context.Context) (string, error) {
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		endpoint := c.readURL + "/healthz"
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -149,6 +162,7 @@ func (c *Client) SearchItems(ctx context.Context, query string, limit int) ([]It
 		limit = 50
 	}
 
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		q := url.Values{}
 		q.Set("limit", strconv.Itoa(limit))
@@ -236,6 +250,7 @@ func (c *Client) SearchItemWarehouses(ctx context.Context, itemCode, query strin
 		limit = 50
 	}
 
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		q := url.Values{}
 		q.Set("limit", strconv.Itoa(limit))

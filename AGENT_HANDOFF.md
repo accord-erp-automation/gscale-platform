@@ -20,21 +20,19 @@ The mobile app checkout now tracks:
 
 - `gscale-zebra`
   - branch: `main`
-  - HEAD: `2b3442c` (`Refresh scale dev runtime logs`)
-  - `origin/main` is the same commit
-  - working tree may look dirty because live processes are currently writing log files
+  - `origin/main` is currently behind local working changes
+  - working tree includes code changes for core-owned ERP config, read-service discovery, and mobile ERP setup UX
+  - working tree may also look dirty because live processes write log files under `logs/`
 
 - `erp_scz_db_reader`
   - branch: `main`
-  - HEAD: `cb27235` (`Filter ERP item search by stock`)
-  - ahead of `origin/main` by 1 commit
-  - not pushed yet
+  - latest pushed commit includes `GET /v1/handshake`
+  - the service now advertises itself as `gscale_erp_read`
 
 - `hard_con_v2` checkout
   - path: `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2`
   - branch: `main`
-  - HEAD: `a5ae288` (`Polish mobile control flow and remove line tab`)
-  - synced with `origin/main`
+  - working tree includes the latest Server-tab ERP setup simplification and discovery-driven UI
 
 ## Active Local Processes Right Now
 
@@ -286,12 +284,74 @@ That means:
 
 Keep the shared workflow/core layer as the main orchestration owner, and keep the Telegram bot and mobile app as thin clients over it.
 
+### ERP Setup Direction
+
+This direction is now partially implemented.
+
+Current behavior:
+
+- `mobileapi` starts even when ERP write config is absent
+- monitor and non-ERP write features can still come up in that degraded state
+- `Batch Start` fails fast with `erp_not_configured` instead of dying late in the workflow
+- the mobile app `Server` screen can submit ERP config through:
+  - `GET /v1/mobile/setup/status`
+  - `POST /v1/mobile/setup/erp`
+  - `DELETE /v1/mobile/setup/erp`
+- submitted secret fields are cleared from the mobile UI after a successful save
+
+Core config ownership now:
+
+- ERP config is no longer conceptually owned by `bot/.env`
+- shared runtime config lives under `config/core.env`
+- shared loading logic lives in:
+  - `/home/wikki/storage/local.git/gscale-zebra/core/runtimecfg/runtimecfg.go`
+- `mobileapi` persistence helpers live in:
+  - `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/setup_store.go`
+
+Read-service discovery now:
+
+- mobile UI no longer needs a manual `ERP read URL`
+- the server accepts only:
+  - `erp_url`
+  - `erp_api_key`
+  - `erp_api_secret`
+- after validating ERP write access, the server auto-discovers the read service
+- shared discovery logic lives in:
+  - `/home/wikki/storage/local.git/gscale-zebra/core/erpread/discovery.go`
+- the read service now exposes:
+  - `GET /v1/handshake`
+  - expected payload: `{"ok":true,"service":"gscale_erp_read"}`
+
+Bot behavior now:
+
+- bot ERP client also uses the same read-service discovery fallback when `ERP_READ_URL` is not explicitly set
+- relevant files:
+  - `/home/wikki/storage/local.git/gscale-zebra/bot/internal/erp/client.go`
+  - `/home/wikki/storage/local.git/gscale-zebra/bot/internal/erp/stock_entry.go`
+
+Remote production-ish ERP host state:
+
+- on the Fedora mini server, `gscale-erp-read` is now deployed as a systemd service:
+  - `gscale-erp-read.service`
+- binary path:
+  - `/usr/local/bin/gscale-erp-read`
+- env file:
+  - `/etc/gscale-erp-read.env`
+- it is bound to ERP startup via systemd ordering and `PartOf=erpnext-prod.service`
+- nginx proxies the service under:
+  - `https://erp.accord.uz/gscale-read/...`
+  - `https://erp.accord.uz/gscale_erp_read/...`
+- reboot was tested end-to-end:
+  - `erpnext-prod.service` came up
+  - `gscale-erp-read.service` waited for `/login`
+  - handshake and item search worked after reboot
+
 ### Recommended sequence
 
-1. Move any remaining batch orchestration out of bot handlers and into the shared service layer.
-2. Keep Telegram bot as a thin client over that service.
-3. Keep `mobileapi` aligned with the shared workflow contract.
-4. Keep the mobile app synced to the `hard_con_v2` checkout and its control workflow.
+1. Commit and push the current `gscale-zebra` core-config and discovery changes.
+2. Commit and push the current `hard_con_v2` Server-tab simplification.
+3. Decide whether `run-dev` should keep explicit `ERP_READ_URL` wiring or fully rely on discovery by default.
+4. If desired, mirror the remote ERP proxy path locally under nginx or Caddy for parity.
 
 ### Suggested first control endpoints
 
@@ -305,10 +365,12 @@ Keep the shared workflow/core layer as the main orchestration owner, and keep th
 
 - There are live local processes right now. Stop them before doing runtime debugging.
 - `bot/.env` is local and untracked. Do not accidentally commit secrets.
-- `erp_scz_db_reader` has an unpushed commit (`cb27235`). Keep that in mind if the next agent changes the service again.
+- `config/core.env` is local runtime state. Do not commit it.
+- `erp_scz_db_reader` handshake support is already pushed, but local test deploys may still exist on remote hosts.
 - The mobile app checkout is inside this repo now at `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2`.
 - `Material Receipt` must not start batch anymore. Only `Batch Start` is allowed to do that.
 - `hard_con_v2` now has a GitHub Actions workflow at `.github/workflows/ios-unsigned-ipa.yml` that builds an unsigned `.ipa` artifact on push.
+- Current mobile batch flow still depends on ERP write config being available server-side, but the provisioning flow for that now exists and is usable.
 
 ## Good Starting Files For The Next Agent
 
@@ -316,6 +378,9 @@ Keep the shared workflow/core layer as the main orchestration owner, and keep th
 - `/home/wikki/storage/local.git/gscale-zebra/bot/internal/batchstate/store.go`
 - `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/server.go`
 - `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/config.go`
+- `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/setup_store.go`
+- `/home/wikki/storage/local.git/gscale-zebra/core/runtimecfg/runtimecfg.go`
+- `/home/wikki/storage/local.git/gscale-zebra/core/erpread/discovery.go`
 - `/home/wikki/storage/local.git/erpnext_n1/erp/gscale_erp_read/internal/store/store.go`
 - `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2/lib/main.dart`
 - `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2/Makefile`

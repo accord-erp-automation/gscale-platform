@@ -7,8 +7,24 @@ import (
 	"testing"
 )
 
+func ignoreDiscoveryProbe(w http.ResponseWriter, r *http.Request) bool {
+	switch r.URL.Path {
+	case "/gscale-read/v1/handshake",
+		"/gscale-read/healthz",
+		"/gscale_erp_read/v1/handshake",
+		"/gscale_erp_read/healthz":
+		http.NotFound(w, r)
+		return true
+	default:
+		return false
+	}
+}
+
 func TestCheckConnection(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ignoreDiscoveryProbe(w, r) {
+			return
+		}
 		if got := r.Header.Get("Authorization"); got != "token k:s" {
 			t.Fatalf("auth header mismatch: %q", got)
 		}
@@ -55,6 +71,9 @@ func TestCheckConnection_UsesReadServiceWhenConfigured(t *testing.T) {
 
 func TestSearchItems(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ignoreDiscoveryProbe(w, r) {
+			return
+		}
 		if got := r.Header.Get("Authorization"); got != "token k:s" {
 			t.Fatalf("auth header mismatch: %q", got)
 		}
@@ -110,6 +129,9 @@ func TestSearchItems_UsesReadServiceWhenConfigured(t *testing.T) {
 
 func TestSearchItemWarehouses(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ignoreDiscoveryProbe(w, r) {
+			return
+		}
 		if got := r.Header.Get("Authorization"); got != "token k:s" {
 			t.Fatalf("auth header mismatch: %q", got)
 		}

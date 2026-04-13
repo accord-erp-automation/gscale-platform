@@ -21,7 +21,8 @@ sudo ./install.sh --start
 
 Then set real credentials:
 
-- `config/bot.env` (token + ERP creds)
+- `config/bot.env` (telegram token)
+- `config/core.env` (shared core ERP creds)
 - `config/scale.env` (device paths)
 
 Service management:

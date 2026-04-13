@@ -30,6 +30,9 @@ func TestCreateMaterialReceiptDraft(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ignoreDiscoveryProbe(w, r) {
+			return
+		}
 		if got := r.Header.Get("Authorization"); got != "token k:s" {
 			t.Fatalf("auth header mismatch: %q", got)
 		}
@@ -171,6 +174,9 @@ func TestSubmitStockEntryDraft(t *testing.T) {
 	t.Helper()
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ignoreDiscoveryProbe(w, r) {
+			return
+		}
 		if got := r.Header.Get("Authorization"); got != "token k:s" {
 			t.Fatalf("auth header mismatch: %q", got)
 		}
@@ -209,6 +215,9 @@ func TestDeleteStockEntryDraft(t *testing.T) {
 	t.Helper()
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ignoreDiscoveryProbe(w, r) {
+			return
+		}
 		if got := r.Header.Get("Authorization"); got != "token k:s" {
 			t.Fatalf("auth header mismatch: %q", got)
 		}

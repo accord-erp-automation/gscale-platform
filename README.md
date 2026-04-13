@@ -248,7 +248,9 @@ Faqat bot:
 ```bash
 cd bot
 cp .env.example .env
-# token va ERP credentials ni to'ldiring
+# tokenni to'ldiring
+cp config/core.env.example config/core.env
+# core ERP credentials ni config/core.env ichida to'ldiring
 go run ./cmd/bot
 ```
 
@@ -271,14 +273,18 @@ Natija `dist/` ichida Linux tarball ko'rinishida hosil bo'ladi.
 ### 8.1 Bot (`bot/.env`)
 Majburiy:
 - `TELEGRAM_BOT_TOKEN`
+
+### 8.2 Core (`config/core.env`)
+Majburiy:
 - `ERP_URL`
 - `ERP_API_KEY`
 - `ERP_API_SECRET`
 
 Ixtiyoriy:
+- `ERP_READ_URL`
 - `BRIDGE_STATE_FILE` (default: `/tmp/gscale-zebra/bridge_state.json`)
 
-### 8.2 Scale (`flags`)
+### 8.3 Scale (`flags`)
 Asosiy flaglar:
 - `--device`, `--baud`, `--baud-list`
 - `--bridge-url`, `--bridge-interval`, `--no-bridge`
@@ -286,7 +292,7 @@ Asosiy flaglar:
 - `--bot-dir`, `--no-bot`
 - `--bridge-state-file`
 
-### 8.3 Deploy env (systemd)
+### 8.4 Deploy env (systemd)
 `deploy/config/scale.env.example`:
 - `SCALE_DEVICE`
 - `ZEBRA_DEVICE`
@@ -294,10 +300,6 @@ Asosiy flaglar:
 
 `deploy/config/bot.env.example`:
 - `TELEGRAM_BOT_TOKEN`
-- `ERP_URL`
-- `ERP_API_KEY`
-- `ERP_API_SECRET`
-- `BRIDGE_STATE_FILE`
 
 ## 9. Buyruqlar va boshqaruv
 ### 9.1 Make targetlar
