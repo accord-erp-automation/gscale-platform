@@ -4,13 +4,12 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-)
 
-const defaultBridgeStateFile = "/tmp/gscale-zebra/bridge_state.json"
+	"core/runtimecfg"
+)
 
 type Config struct {
 	TelegramBotToken string
@@ -20,6 +19,8 @@ type Config struct {
 	ERPAPISecret     string
 	BridgeStateFile  string
 }
+
+const defaultCoreEnvPath = "../config/core.env"
 
 func Load(envPath string) (Config, error) {
 	if strings.TrimSpace(envPath) == "" {
@@ -31,6 +32,12 @@ func Load(envPath string) (Config, error) {
 		return Config{}, err
 	}
 
+	coreEnvPath := firstNonEmpty(os.Getenv("CORE_ENV_PATH"), defaultCoreEnvPath)
+	coreCfg, err := runtimecfg.Load(coreEnvPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		TelegramBotToken: firstNonEmpty(
 			os.Getenv("TELEGRAM_BOT_TOKEN"),
@@ -38,30 +45,11 @@ func Load(envPath string) (Config, error) {
 			fileVals["BOT_TOKEN"],
 			fileVals["TOKEN"],
 		),
-		ERPURL: firstNonEmpty(
-			os.Getenv("ERP_URL"),
-			fileVals["ERP_URL"],
-			fileVals["URL"],
-		),
-		ERPReadURL: firstNonEmpty(
-			os.Getenv("ERP_READ_URL"),
-			fileVals["ERP_READ_URL"],
-		),
-		ERPAPIKey: firstNonEmpty(
-			os.Getenv("ERP_API_KEY"),
-			fileVals["ERP_API_KEY"],
-			fileVals["API_KEY"],
-		),
-		ERPAPISecret: firstNonEmpty(
-			os.Getenv("ERP_API_SECRET"),
-			fileVals["ERP_API_SECRET"],
-			fileVals["API_SECRET"],
-		),
-		BridgeStateFile: firstNonEmpty(
-			os.Getenv("BRIDGE_STATE_FILE"),
-			fileVals["BRIDGE_STATE_FILE"],
-			defaultBridgeStateFile,
-		),
+		ERPURL:          coreCfg.ERPURL,
+		ERPReadURL:      coreCfg.ERPReadURL,
+		ERPAPIKey:       coreCfg.ERPAPIKey,
+		ERPAPISecret:    coreCfg.ERPAPISecret,
+		BridgeStateFile: coreCfg.BridgeStateFile,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -89,16 +77,6 @@ func (c Config) Validate() error {
 		return errors.New("BRIDGE_STATE_FILE bo'sh")
 	}
 
-	u, err := url.Parse(strings.TrimSpace(c.ERPURL))
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return errors.New("ERP_URL noto'g'ri (example: https://erp.accord.uz)")
-	}
-	if strings.TrimSpace(c.ERPReadURL) != "" {
-		u, err = url.Parse(strings.TrimSpace(c.ERPReadURL))
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return errors.New("ERP_READ_URL noto'g'ri (example: http://127.0.0.1:8090)")
-		}
-	}
 	return nil
 }
 

@@ -172,8 +172,7 @@ run-dev: fresh-bridge-state
 			sed -n '1,160p' "$(ERP_READ_DEV_LOG)"; \
 			exit 1; \
 		fi; \
-			. "$(CURDIR)/bot/.env"; \
-			env MOBILE_API_ADDR="$(MOBILE_API_ADDR)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$(POLYGON_HTTP_ADDR)" ERP_READ_URL="$(ERP_READ_URL)" ERP_URL="$$ERP_URL" ERP_API_KEY="$$ERP_API_KEY" ERP_API_SECRET="$$ERP_API_SECRET" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
+			env MOBILE_API_ADDR="$(MOBILE_API_ADDR)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$(POLYGON_HTTP_ADDR)" ERP_READ_URL="$(ERP_READ_URL)" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
 			MOBILEAPI_PID=$$!; \
 		echo "$$MOBILEAPI_PID" >/tmp/gscale-zebra/mobileapi.pid; \
 	for i in $$(seq 1 40); do \

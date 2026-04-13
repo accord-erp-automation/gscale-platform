@@ -249,6 +249,7 @@ func IsDuplicateBarcodeError(err error) bool {
 }
 
 func (c *Client) lookupWarehouseCompany(ctx context.Context, warehouse string) (string, error) {
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.readURL+"/v1/warehouses/"+url.PathEscape(strings.TrimSpace(warehouse)), nil)
 		if err != nil {
@@ -312,6 +313,7 @@ func (c *Client) lookupWarehouseCompany(ctx context.Context, warehouse string) (
 }
 
 func (c *Client) lookupItemStockUOM(ctx context.Context, itemCode string) (string, error) {
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.readURL+"/v1/items/"+url.PathEscape(strings.TrimSpace(itemCode)), nil)
 		if err != nil {

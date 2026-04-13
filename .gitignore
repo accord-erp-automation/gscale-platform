@@ -1,2 +1,4 @@
 mobile_app/
 hard_con_v2/
+config/core.env
+bot/.env.backup_*

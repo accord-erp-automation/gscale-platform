@@ -6,6 +6,7 @@ import (
 	"context"
 	corepkg "core"
 	"core/batchcontrol"
+	"core/erpread"
 	"core/workflow"
 	"encoding/json"
 	"fmt"
@@ -20,6 +21,44 @@ import (
 )
 
 const mobileBatchOwnerID int64 = 1
+
+func validateERPWriteSetup(ctx context.Context, setup ERPSetup) error {
+	client := &erpClient{
+		baseURL:   strings.TrimRight(strings.TrimSpace(setup.ERPURL), "/"),
+		apiKey:    strings.TrimSpace(setup.ERPAPIKey),
+		apiSecret: strings.TrimSpace(setup.ERPAPISecret),
+		http:      &http.Client{Timeout: 12 * time.Second},
+	}
+	_, err := client.CheckConnection(ctx)
+	return err
+}
+
+func (s *Server) applyERPSetup(setup ERPSetup) {
+	if s == nil {
+		return
+	}
+	setup.ERPURL = strings.TrimSpace(setup.ERPURL)
+	setup.ERPReadURL = strings.TrimSpace(setup.ERPReadURL)
+	setup.ERPAPIKey = strings.TrimSpace(setup.ERPAPIKey)
+	setup.ERPAPISecret = strings.TrimSpace(setup.ERPAPISecret)
+
+	oldControl := s.control
+	oldCancel := s.controlCancel
+
+	s.cfg.ERPURL = setup.ERPURL
+	s.cfg.ERPReadURL = setup.ERPReadURL
+	s.cfg.ERPAPIKey = setup.ERPAPIKey
+	s.cfg.ERPAPISecret = setup.ERPAPISecret
+	s.controlCtx, s.controlCancel = context.WithCancel(context.Background())
+	s.control = s.newControlService()
+
+	if oldControl != nil {
+		oldControl.StopAll()
+	}
+	if oldCancel != nil {
+		oldCancel()
+	}
+}
 
 func (s *Server) newControlService() *batchcontrol.Service {
 	bridgeStore := bridgestate.New(s.cfg.BridgeStateFile)
@@ -400,7 +439,19 @@ func newERPClient(cfg Config) *erpClient {
 	}
 }
 
+func (c *erpClient) resolveReadURL(ctx context.Context) {
+	if c == nil || strings.TrimSpace(c.readURL) != "" || strings.TrimSpace(c.baseURL) == "" {
+		return
+	}
+	result, err := erpread.Resolve(ctx, c.http, c.baseURL, "")
+	if err != nil {
+		return
+	}
+	c.readURL = strings.TrimRight(strings.TrimSpace(result.BaseURL), "/")
+}
+
 func (c *erpClient) CheckConnection(ctx context.Context) (string, error) {
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.readURL+"/healthz", nil)
 		if err != nil {
@@ -457,6 +508,7 @@ func (c *erpClient) SearchItems(ctx context.Context, query string, limit int) ([
 		limit = 50
 	}
 
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		q := url.Values{}
 		q.Set("limit", strconv.Itoa(limit))
@@ -531,6 +583,7 @@ func (c *erpClient) SearchItemWarehouses(ctx context.Context, itemCode, query st
 		limit = 50
 	}
 
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		q := url.Values{}
 		q.Set("limit", strconv.Itoa(limit))
@@ -751,6 +804,7 @@ func (c *erpClient) DeleteStockEntryDraft(ctx context.Context, name string) erro
 }
 
 func (c *erpClient) lookupWarehouseCompany(ctx context.Context, warehouse string) (string, error) {
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.readURL+"/v1/warehouses/"+url.PathEscape(strings.TrimSpace(warehouse)), nil)
 		if err != nil {
@@ -806,6 +860,7 @@ func (c *erpClient) lookupWarehouseCompany(ctx context.Context, warehouse string
 }
 
 func (c *erpClient) lookupItemStockUOM(ctx context.Context, itemCode string) (string, error) {
+	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.readURL+"/v1/items/"+url.PathEscape(strings.TrimSpace(itemCode)), nil)
 		if err != nil {

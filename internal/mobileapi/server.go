@@ -4,6 +4,7 @@ import (
 	bridgestate "bridge/state"
 	"context"
 	"core/batchcontrol"
+	"core/erpread"
 	"core/workflow"
 	"crypto/rand"
 	"encoding/hex"
@@ -33,6 +34,13 @@ type authLoginRequest struct {
 	Code  string `json:"code"`
 }
 
+type setupERPRequest struct {
+	ERPURL       string `json:"erp_url"`
+	ERPReadURL   string `json:"erp_read_url"`
+	ERPAPIKey    string `json:"erp_api_key"`
+	ERPAPISecret string `json:"erp_api_secret"`
+}
+
 type batchStartRequest struct {
 	ItemCode  string `json:"item_code"`
 	ItemName  string `json:"item_name"`
@@ -40,12 +48,13 @@ type batchStartRequest struct {
 }
 
 type Server struct {
-	cfg           Config
-	store         *bridgestate.Store
-	http          *http.Client
-	control       *batchcontrol.Service
-	controlCtx    context.Context
-	controlCancel context.CancelFunc
+	cfg              Config
+	store            *bridgestate.Store
+	http             *http.Client
+	control          *batchcontrol.Service
+	controlCtx       context.Context
+	controlCancel    context.CancelFunc
+	validateERPSetup func(context.Context, ERPSetup) error
 
 	mu     sync.Mutex
 	tokens map[string]SessionProfile
@@ -92,6 +101,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/mobile/auth/login", s.handleLogin)
 	mux.HandleFunc("/v1/mobile/auth/logout", s.handleLogout)
 	mux.HandleFunc("/v1/mobile/profile", s.handleProfile)
+	mux.HandleFunc("/v1/mobile/setup/status", s.handleSetupStatus)
+	mux.HandleFunc("/v1/mobile/setup/erp", s.handleSetupERP)
 	mux.HandleFunc("/v1/mobile/monitor/state", s.handleMonitorState)
 	mux.HandleFunc("/v1/mobile/monitor/stream", s.handleMonitorStream)
 	mux.HandleFunc("/v1/mobile/items", s.handleItems)
@@ -221,6 +232,86 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, profile)
+}
+
+func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, s.setupStatusPayload())
+}
+
+func (s *Server) handleSetupERP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if s.control != nil && s.control.ActiveBatch().Active {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_active"})
+		return
+	}
+	if r.Method == http.MethodDelete {
+		if err := clearERPSetup(s.cfg.SetupFile); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		s.applyERPSetup(ERPSetup{})
+		writeJSON(w, http.StatusOK, s.setupStatusPayload())
+		return
+	}
+
+	var req setupERPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+
+	setup := ERPSetup{
+		ERPURL:       strings.TrimSpace(req.ERPURL),
+		ERPReadURL:   strings.TrimSpace(req.ERPReadURL),
+		ERPAPIKey:    strings.TrimSpace(req.ERPAPIKey),
+		ERPAPISecret: strings.TrimSpace(req.ERPAPISecret),
+	}
+	if setup.ERPURL == "" || setup.ERPAPIKey == "" || setup.ERPAPISecret == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "erp_url_api_key_api_secret_required"})
+		return
+	}
+
+	validate := s.validateERPSetup
+	if validate == nil {
+		validate = validateERPWriteSetup
+	}
+	if err := validate(r.Context(), setup); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "erp_validation_failed", "message": err.Error()})
+		return
+	}
+	resolvedRead, err := erpread.Resolve(r.Context(), nil, setup.ERPURL, setup.ERPReadURL)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "erp_read_discovery_failed", "message": err.Error()})
+		return
+	}
+	setup.ERPReadURL = resolvedRead.BaseURL
+
+	if err := saveERPSetup(s.cfg.SetupFile, setup); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	s.applyERPSetup(setup)
+
+	writeJSON(w, http.StatusOK, s.setupStatusPayload())
+}
+
+func (s *Server) setupStatusPayload() map[string]any {
+	return map[string]any{
+		"ok":                   true,
+		"erp_write_configured": s.cfg.HasERPWriteConfig(),
+		"erp_read_configured":  strings.TrimSpace(s.cfg.ERPReadURL) != "",
+		"batch_actions_ready":  s.cfg.HasERPWriteConfig(),
+		"erp_url":              strings.TrimSpace(s.cfg.ERPURL),
+		"erp_read_url":         strings.TrimSpace(s.cfg.ERPReadURL),
+	}
 }
 
 func (s *Server) handleMonitorState(w http.ResponseWriter, r *http.Request) {
@@ -426,6 +517,10 @@ func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
 	}.Normalize()
 	if selection.ItemCode == "" || selection.Warehouse == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "item_code_and_warehouse_required"})
+		return
+	}
+	if !s.cfg.HasERPWriteConfig() {
+		writeJSON(w, http.StatusPreconditionFailed, map[string]any{"error": "erp_not_configured"})
 		return
 	}
 	if s.control.HasActiveBatch(mobileBatchOwnerID) {
