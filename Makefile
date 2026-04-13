@@ -6,6 +6,7 @@ BRIDGE_STATE_FILE ?= /tmp/gscale-zebra/bridge_state.json
 POLYGON_HTTP_ADDR ?= 127.0.0.1:18000
 POLYGON_SCENARIO ?= batch-flow
 POLYGON_SEED ?= 42
+RUN_DEV_PORT_SCAN ?= 40
 APP_USER ?= $(shell id -un)
 APP_GROUP ?= $(shell id -gn)
 MOBILE_API_ADDR ?= 0.0.0.0:8081
@@ -120,6 +121,25 @@ run-dev: fresh-bridge-state
 	MOBILEAPI_PID=""; \
 	SCALE_PID=""; \
 	TAIL_PIDS=""; \
+	addr_host() { printf '%s\n' "$$1" | sed -E 's#:[^:]+$$##'; }; \
+	addr_port() { printf '%s\n' "$$1" | awk -F: '{print $$NF}'; }; \
+	url_scheme() { printf '%s\n' "$$1" | sed -E 's#^([A-Za-z][A-Za-z0-9+.-]*)://.*#\1#'; }; \
+	url_hostport() { printf '%s\n' "$$1" | sed -E 's#^[A-Za-z][A-Za-z0-9+.-]*://([^/]+).*#\1#'; }; \
+	connect_host() { case "$$1" in ''|0.0.0.0) printf '127.0.0.1' ;; *) printf '%s' "$$1" ;; esac; }; \
+	port_is_busy() { lsof -nP -iTCP:"$$1" -sTCP:LISTEN >/dev/null 2>&1; }; \
+	pick_free_port() { \
+		PORT="$$1"; \
+		TRIES=0; \
+		while [ "$$TRIES" -lt "$(RUN_DEV_PORT_SCAN)" ]; do \
+			if ! port_is_busy "$$PORT"; then \
+				printf '%s' "$$PORT"; \
+				return 0; \
+			fi; \
+			PORT=$$((PORT + 1)); \
+			TRIES=$$((TRIES + 1)); \
+		done; \
+		return 1; \
+	}; \
 	start_tail() { \
 		FILE="$$1"; \
 		LABEL="$$2"; \
@@ -139,56 +159,96 @@ run-dev: fresh-bridge-state
 		rm -f /tmp/gscale-zebra/erp-read.pid /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid; \
 	}; \
 	trap 'cleanup' EXIT INT TERM; \
-	"$(POLYGON_DEV_BIN)" --http-addr "$(POLYGON_HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" >/tmp/gscale-zebra/polygon.log 2>&1 & \
+	POLYGON_BIND_HOST=$$(addr_host "$(POLYGON_HTTP_ADDR)"); \
+	POLYGON_BASE_PORT=$$(addr_port "$(POLYGON_HTTP_ADDR)"); \
+	POLYGON_PORT=$$(pick_free_port "$$POLYGON_BASE_PORT") || { echo "run-dev: polygon free port topilmadi"; exit 1; }; \
+	POLYGON_CONNECT_HOST=$$(connect_host "$$POLYGON_BIND_HOST"); \
+	POLYGON_ADDR="$$POLYGON_BIND_HOST:$$POLYGON_PORT"; \
+	if [ "$$POLYGON_ADDR" != "$(POLYGON_HTTP_ADDR)" ]; then \
+		printf '[run-dev] polygon port busy, using %s\n' "$$POLYGON_ADDR"; \
+	fi; \
+	ERP_READ_SCHEME=$$(url_scheme "$(ERP_READ_URL)"); \
+	ERP_READ_HOSTPORT=$$(url_hostport "$(ERP_READ_URL)"); \
+	ERP_READ_BIND_HOST=$$(addr_host "$$ERP_READ_HOSTPORT"); \
+	ERP_READ_BASE_PORT=$$(addr_port "$$ERP_READ_HOSTPORT"); \
+	ERP_READ_PORT=$$(pick_free_port "$$ERP_READ_BASE_PORT") || { echo "run-dev: erp read free port topilmadi"; exit 1; }; \
+	ERP_READ_CONNECT_HOST=$$(connect_host "$$ERP_READ_BIND_HOST"); \
+	ERP_READ_ADDR="$$ERP_READ_BIND_HOST:$$ERP_READ_PORT"; \
+	ERP_READ_URL_RESOLVED="$$ERP_READ_SCHEME://$$ERP_READ_CONNECT_HOST:$$ERP_READ_PORT"; \
+	if [ "$$ERP_READ_ADDR" != "$$ERP_READ_HOSTPORT" ]; then \
+		printf '[run-dev] erp read port busy, using %s\n' "$$ERP_READ_ADDR"; \
+	fi; \
+	MOBILE_API_BIND_HOST=$$(addr_host "$(MOBILE_API_ADDR)"); \
+	MOBILE_API_BASE_PORT=$$(addr_port "$(MOBILE_API_ADDR)"); \
+	MOBILE_API_PORT=$$(pick_free_port "$$MOBILE_API_BASE_PORT") || { echo "run-dev: mobileapi free port topilmadi"; exit 1; }; \
+	MOBILE_API_CONNECT_HOST=$$(connect_host "$$MOBILE_API_BIND_HOST"); \
+	MOBILE_API_ADDR_RESOLVED="$$MOBILE_API_BIND_HOST:$$MOBILE_API_PORT"; \
+	if [ "$$MOBILE_API_ADDR_RESOLVED" != "$(MOBILE_API_ADDR)" ]; then \
+		printf '[run-dev] mobileapi port busy, using %s\n' "$$MOBILE_API_ADDR_RESOLVED"; \
+	fi; \
+	ERP_READ_SRC_DIR="$(ERP_BENCH_ROOT)/gscale_erp_read"; \
+	if [ ! -d "$$ERP_READ_SRC_DIR" ] && [ -d "$(CURDIR)/../erpnext_n1/erp_scz_db_reader" ]; then \
+		ERP_READ_SRC_DIR="$(CURDIR)/../erpnext_n1/erp_scz_db_reader"; \
+	fi; \
+	ERP_BENCH_ROOT_RESOLVED="$(ERP_BENCH_ROOT)"; \
+	if [ ! -d "$$ERP_BENCH_ROOT_RESOLVED" ] && [ -d "$(CURDIR)/../erpnext_n1/erp" ]; then \
+		ERP_BENCH_ROOT_RESOLVED="$(CURDIR)/../erpnext_n1/erp"; \
+	fi; \
+	"$(POLYGON_DEV_BIN)" --http-addr "$$POLYGON_ADDR" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" >/tmp/gscale-zebra/polygon.log 2>&1 & \
 	POLY_PID=$$!; \
 	echo "$$POLY_PID" >/tmp/gscale-zebra/polygon.pid; \
 	for i in $$(seq 1 40); do \
-		if $(CURL) -fsS "http://$(POLYGON_HTTP_ADDR)/health" >/dev/null 2>&1; then \
+		if $(CURL) -fsS "http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT/health" >/dev/null 2>&1; then \
 			break; \
 		fi; \
 		sleep 1; \
 	done; \
-		if ! $(CURL) -fsS "http://$(POLYGON_HTTP_ADDR)/health" >/dev/null 2>&1; then \
+		if ! $(CURL) -fsS "http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT/health" >/dev/null 2>&1; then \
 			echo "run-dev: polygon failed to start"; \
 			sed -n '1,160p' /tmp/gscale-zebra/polygon.log; \
 			exit 1; \
 		fi; \
+		if [ ! -d "$$ERP_READ_SRC_DIR" ]; then \
+			echo "run-dev: erp read source topilmadi: $$ERP_READ_SRC_DIR"; \
+			exit 1; \
+		fi; \
 		rm -f "$(ERP_READ_DEV_LOG)"; \
-		cd "$(ERP_BENCH_ROOT)/gscale_erp_read" && \
-		ERP_BENCH_ROOT="$(ERP_BENCH_ROOT)" ERP_READ_ADDR="127.0.0.1:8090" \
+		cd "$$ERP_READ_SRC_DIR" && \
+		ERP_BENCH_ROOT="$$ERP_BENCH_ROOT_RESOLVED" ERP_READ_ADDR="$$ERP_READ_ADDR" \
 			go build -o "$(ERP_READ_DEV_BIN)" ./cmd/gscale-erp-read; \
-		ERP_BENCH_ROOT="$(ERP_BENCH_ROOT)" ERP_READ_ADDR="127.0.0.1:8090" \
+		ERP_BENCH_ROOT="$$ERP_BENCH_ROOT_RESOLVED" ERP_READ_ADDR="$$ERP_READ_ADDR" \
 			"$(ERP_READ_DEV_BIN)" >"$(ERP_READ_DEV_LOG)" 2>&1 & \
 		ERP_READ_PID=$$!; \
 		echo "$$ERP_READ_PID" >/tmp/gscale-zebra/erp-read.pid; \
 		for i in $$(seq 1 40); do \
-			if $(CURL) -fsS "http://127.0.0.1:8090/healthz" >/dev/null 2>&1; then \
+			if $(CURL) -fsS "http://$$ERP_READ_CONNECT_HOST:$$ERP_READ_PORT/healthz" >/dev/null 2>&1; then \
 				break; \
 			fi; \
 			sleep 1; \
 		done; \
-		if ! $(CURL) -fsS "http://127.0.0.1:8090/healthz" >/dev/null 2>&1; then \
+		if ! $(CURL) -fsS "http://$$ERP_READ_CONNECT_HOST:$$ERP_READ_PORT/healthz" >/dev/null 2>&1; then \
 			echo "run-dev: erp read failed to start"; \
 			sed -n '1,160p' "$(ERP_READ_DEV_LOG)"; \
 			exit 1; \
 		fi; \
-			env MOBILE_API_ADDR="$(MOBILE_API_ADDR)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$(POLYGON_HTTP_ADDR)" ERP_READ_URL="$(ERP_READ_URL)" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
+			env MOBILE_API_ADDR="$$MOBILE_API_ADDR_RESOLVED" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT" ERP_READ_URL="$$ERP_READ_URL_RESOLVED" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
 			MOBILEAPI_PID=$$!; \
 		echo "$$MOBILEAPI_PID" >/tmp/gscale-zebra/mobileapi.pid; \
 	for i in $$(seq 1 40); do \
-		if $(CURL) -fsS "http://127.0.0.1:8081/healthz" >/dev/null 2>&1; then \
+		if $(CURL) -fsS "http://$$MOBILE_API_CONNECT_HOST:$$MOBILE_API_PORT/healthz" >/dev/null 2>&1; then \
 			break; \
 		fi; \
 		sleep 1; \
 	done; \
-		if ! $(CURL) -fsS "http://127.0.0.1:8081/healthz" >/dev/null 2>&1; then \
+		if ! $(CURL) -fsS "http://$$MOBILE_API_CONNECT_HOST:$$MOBILE_API_PORT/healthz" >/dev/null 2>&1; then \
 			echo "run-dev: mobileapi failed to start"; \
 			sed -n '1,160p' /tmp/gscale-zebra/mobileapi.log; \
 			exit 1; \
 		fi; \
 		rm -f "$(SCALE_DEV_LAUNCH_LOG)"; \
-		SCALE_CMD='cd "$(CURDIR)/scale" && exec go run . --no-bot --no-zebra --bridge-url "http://$(POLYGON_HTTP_ADDR)/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)"'; \
-		script -q -e -c "$$SCALE_CMD" "$(SCALE_DEV_LAUNCH_LOG)" >/dev/null 2>&1 & \
+		touch "$(SCALE_DEV_LAUNCH_LOG)"; \
+		SCALE_CMD='cd "$(CURDIR)/scale" && exec go run . --no-bot --no-zebra --bridge-url "http://'"$$POLYGON_CONNECT_HOST"':'"$$POLYGON_PORT"'/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)"'; \
+		script -q -e "$(SCALE_DEV_LAUNCH_LOG)" /bin/sh -lc "$$SCALE_CMD" >/dev/null 2>&1 & \
 		SCALE_PID=$$!; \
 		echo "$$SCALE_PID" >/tmp/gscale-zebra/scale.pid; \
 		sleep 2; \
@@ -197,9 +257,9 @@ run-dev: fresh-bridge-state
 			sed -n '1,160p' "$(SCALE_DEV_LAUNCH_LOG)"; \
 			exit 1; \
 		fi; \
-		printf '[run-dev] 1/4 simulator ready: http://%s\n' "$(POLYGON_HTTP_ADDR)"; \
-		printf '[run-dev] 2/4 erp read ready:  http://127.0.0.1:8090\n'; \
-		printf '[run-dev] 3/4 mobileapi ready: http://127.0.0.1:8081\n'; \
+		printf '[run-dev] 1/4 simulator ready: http://%s\n' "$$POLYGON_CONNECT_HOST:$$POLYGON_PORT"; \
+		printf '[run-dev] 2/4 erp read ready:  http://%s:%s\n' "$$ERP_READ_CONNECT_HOST" "$$ERP_READ_PORT"; \
+		printf '[run-dev] 3/4 mobileapi ready: http://%s:%s\n' "$$MOBILE_API_CONNECT_HOST" "$$MOBILE_API_PORT"; \
 		printf '[run-dev] 4/4 core ready:      scale running in background\n'; \
 		printf '[run-dev] live logs: scale print_request + polygon fake zebra\n'; \
 		start_tail /tmp/gscale-zebra/polygon.log polygon; \
