@@ -277,18 +277,16 @@ func buildBatchFlowCycle(rng *rand.Rand) []cycleFrame {
 	for i := 0; i < rounds; i++ {
 		target := roundWeight(0.360 + rng.Float64()*1.650 + float64(i%2)*0.075)
 		frames = append(frames,
-			cycleFrame{weight: roundWeight(jitterWeight(rng, 0, 0.003)), stable: true, duration: randDuration(rng, 800*time.Millisecond, 1500*time.Millisecond)},
+			cycleFrame{weight: 0, stable: true, duration: randDuration(rng, 700*time.Millisecond, 1100*time.Millisecond)},
 		)
-		frames = append(frames, appendRamp(rng, 0, target, 5, 120*time.Millisecond, 240*time.Millisecond, 0.008)...)
+		frames = append(frames, appendRamp(rng, 0, target, 5, 180*time.Millisecond, 320*time.Millisecond, 0.008)...)
 		frames = append(frames,
-			cycleFrame{weight: roundWeight(jitterWeight(rng, target, 0.005)), stable: false, duration: randDuration(rng, 180*time.Millisecond, 300*time.Millisecond)},
-			cycleFrame{weight: roundWeight(jitterWeight(rng, target, 0.002)), stable: true, duration: randDuration(rng, 1200*time.Millisecond, 2200*time.Millisecond)},
-			cycleFrame{weight: roundWeight(jitterWeight(rng, target, 0.0015)), stable: true, duration: randDuration(rng, 700*time.Millisecond, 1200*time.Millisecond)},
+			cycleFrame{weight: roundWeight(jitterWeight(rng, target, 0.005)), stable: false, duration: randDuration(rng, 220*time.Millisecond, 420*time.Millisecond)},
+			cycleFrame{weight: roundWeight(jitterWeight(rng, target, 0.0015)), stable: true, duration: randDuration(rng, 4600*time.Millisecond, 5600*time.Millisecond)},
 		)
-		frames = append(frames, appendRamp(rng, target, 0, 4, 120*time.Millisecond, 240*time.Millisecond, 0.006)...)
+		frames = append(frames, appendRamp(rng, target, 0, 4, 180*time.Millisecond, 320*time.Millisecond, 0.006)...)
 		frames = append(frames,
-			cycleFrame{weight: 0, stable: true, duration: randDuration(rng, 900*time.Millisecond, 1800*time.Millisecond)},
-			cycleFrame{weight: roundWeight(jitterWeight(rng, 0, 0.002)), stable: true, duration: randDuration(rng, 500*time.Millisecond, 900*time.Millisecond)},
+			cycleFrame{weight: 0, stable: true, duration: randDuration(rng, 1200*time.Millisecond, 1800*time.Millisecond)},
 		)
 	}
 	return frames
@@ -414,6 +412,9 @@ func (s *simulator) applyCycleFrameLocked(now time.Time) {
 	}
 	frame := s.cycle[s.cycleIndex]
 	weight := frame.weight
+	if frame.stable && weight < 0.05 {
+		weight = 0
+	}
 	stable := frame.stable
 	s.scaleScale.Weight = &weight
 	s.scaleScale.Stable = &stable
@@ -440,10 +441,16 @@ func (s *simulator) processPrintRequestLocked(now time.Time) error {
 		s.printFinishAt = time.Time{}
 	}
 
-	if s.activePrintEPC == "" && reqEPC != "" && (reqStatus == "" || reqStatus == "pending") {
+	if s.activePrintEPC == "" && reqEPC != "" && (reqStatus == "" || reqStatus == "pending" || reqStatus == "processing") {
 		s.activePrintEPC = reqEPC
-		s.printFinishAt = now.Add(s.printDelay)
-		s.zebra.Action = "encode"
+		if reqStatus == "processing" {
+			s.printFinishAt = now.Add(s.printDelay / 2)
+		} else {
+			s.printFinishAt = now.Add(s.printDelay)
+		}
+		s.zebra.Action = "print"
+		s.zebra.DeviceState = "busy"
+		s.zebra.MediaState = "printing"
 		s.zebra.Error = ""
 		s.zebra.Verify = "PROCESSING"
 		s.startPrinterCommandLocked(req, now)
@@ -465,13 +472,17 @@ func (s *simulator) processPrintRequestLocked(now time.Time) error {
 	success := s.resolvePrintSuccessLocked()
 	s.activePrintEPC = ""
 	s.printFinishAt = time.Time{}
-	s.zebra.Action = "encode"
+	s.zebra.Action = "print"
 	s.zebra.LastEPC = epc
 	if success {
+		s.zebra.DeviceState = "ready"
+		s.zebra.MediaState = "ok"
 		s.zebra.Verify = "WRITTEN"
 		s.zebra.Error = ""
 		s.finishPrinterCommandLocked(epc, "done", "", now)
 	} else {
+		s.zebra.DeviceState = "attention"
+		s.zebra.MediaState = "paused"
 		s.zebra.Verify = "ERROR"
 		s.zebra.Error = "polygon forced print failure"
 		s.finishPrinterCommandLocked(epc, "error", "polygon forced print failure", now)

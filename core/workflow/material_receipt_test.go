@@ -375,3 +375,45 @@ func TestIsContextError(t *testing.T) {
 		t.Fatal("plain error should not be treated as context error")
 	}
 }
+
+func TestRunSkipsTooSmallStableQty(t *testing.T) {
+	t.Parallel()
+
+	qtyReader := &stubQtyReader{
+		stableReadings: []stableReadingResult{
+			{reading: StableReading{Qty: 0.050, Unit: "kg"}},
+			{err: context.Canceled},
+		},
+		nextCycleErrs: []error{nil},
+	}
+	erp := &stubERP{}
+	printWriter := &stubPrintRequestWriter{}
+	generator := &stubGenerator{epcs: []string{"EPC-001"}}
+	history := &stubHistory{}
+
+	runner := NewMaterialReceiptRunner(MaterialReceiptDependencies{
+		QtyReader:     qtyReader,
+		ERP:           erp,
+		PrintRequests: printWriter,
+		EPCGenerator:  generator,
+		History:       history,
+	})
+
+	err := runner.Run(context.Background(), Selection{
+		ItemCode:  "ITEM-001",
+		ItemName:  "Green Tea",
+		Warehouse: "Stores - A",
+	}, Hooks{})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if len(erp.createInputs) != 0 {
+		t.Fatalf("draft should not be created for tiny qty: %#v", erp.createInputs)
+	}
+	if len(printWriter.setCalls) != 0 {
+		t.Fatalf("print request should not be created for tiny qty: %#v", printWriter.setCalls)
+	}
+	if len(history.items) != 0 {
+		t.Fatalf("history should stay empty: %#v", history.items)
+	}
+}

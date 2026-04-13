@@ -11,6 +11,9 @@ APP_GROUP ?= $(shell id -gn)
 MOBILE_API_ADDR ?= 0.0.0.0:8081
 MOBILE_API_SERVER_NAME ?= $(shell hostname)
 ERP_READ_URL ?= http://127.0.0.1:8090
+ERP_READ_DEV_BIN ?= /tmp/gscale-zebra/erp-read-dev
+ERP_READ_DEV_LOG ?= /tmp/gscale-zebra/erp-read.log
+ERP_BENCH_ROOT ?= /home/wikki/storage/local.git/erpnext_n1/erp
 CURL ?= curl
 POLYGON_DEV_BIN ?= /tmp/gscale-zebra/polygon-dev
 MOBILEAPI_DEV_BIN ?= /tmp/gscale-zebra/mobileapi-dev
@@ -113,6 +116,7 @@ run-dev: fresh-bridge-state
 	@go build -o "$(POLYGON_DEV_BIN)" ./polygon
 	@go build -o "$(MOBILEAPI_DEV_BIN)" ./cmd/mobileapi
 	@POLY_PID=""; \
+	ERP_READ_PID=""; \
 	MOBILEAPI_PID=""; \
 	SCALE_PID=""; \
 	TAIL_PIDS=""; \
@@ -125,12 +129,14 @@ run-dev: fresh-bridge-state
 	}; \
 	cleanup() { \
 		if [ -n "$$SCALE_PID" ]; then kill "$$SCALE_PID" 2>/dev/null || true; fi; \
+		if [ -n "$$ERP_READ_PID" ]; then kill "$$ERP_READ_PID" 2>/dev/null || true; fi; \
 		if [ -n "$$MOBILEAPI_PID" ]; then kill "$$MOBILEAPI_PID" 2>/dev/null || true; fi; \
 		if [ -n "$$POLY_PID" ]; then kill "$$POLY_PID" 2>/dev/null || true; fi; \
 		if [ -n "$$TAIL_PIDS" ]; then kill $$TAIL_PIDS 2>/dev/null || true; fi; \
+		pgrep -f '[/]tmp/gscale-zebra/erp-read-dev' | xargs -r kill 2>/dev/null || true; \
 		pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true; \
 		pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true; \
-		rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid; \
+		rm -f /tmp/gscale-zebra/erp-read.pid /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid; \
 	}; \
 	trap 'cleanup' EXIT INT TERM; \
 	"$(POLYGON_DEV_BIN)" --http-addr "$(POLYGON_HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" >/tmp/gscale-zebra/polygon.log 2>&1 & \
@@ -142,14 +148,34 @@ run-dev: fresh-bridge-state
 		fi; \
 		sleep 1; \
 	done; \
-	if ! $(CURL) -fsS "http://$(POLYGON_HTTP_ADDR)/health" >/dev/null 2>&1; then \
-		echo "run-dev: polygon failed to start"; \
-		sed -n '1,160p' /tmp/gscale-zebra/polygon.log; \
-		exit 1; \
-	fi; \
-	env MOBILE_API_ADDR="$(MOBILE_API_ADDR)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$(POLYGON_HTTP_ADDR)" ERP_READ_URL="$(ERP_READ_URL)" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
-	MOBILEAPI_PID=$$!; \
-	echo "$$MOBILEAPI_PID" >/tmp/gscale-zebra/mobileapi.pid; \
+		if ! $(CURL) -fsS "http://$(POLYGON_HTTP_ADDR)/health" >/dev/null 2>&1; then \
+			echo "run-dev: polygon failed to start"; \
+			sed -n '1,160p' /tmp/gscale-zebra/polygon.log; \
+			exit 1; \
+		fi; \
+		rm -f "$(ERP_READ_DEV_LOG)"; \
+		cd "$(ERP_BENCH_ROOT)/gscale_erp_read" && \
+		ERP_BENCH_ROOT="$(ERP_BENCH_ROOT)" ERP_READ_ADDR="127.0.0.1:8090" \
+			go build -o "$(ERP_READ_DEV_BIN)" ./cmd/gscale-erp-read; \
+		ERP_BENCH_ROOT="$(ERP_BENCH_ROOT)" ERP_READ_ADDR="127.0.0.1:8090" \
+			"$(ERP_READ_DEV_BIN)" >"$(ERP_READ_DEV_LOG)" 2>&1 & \
+		ERP_READ_PID=$$!; \
+		echo "$$ERP_READ_PID" >/tmp/gscale-zebra/erp-read.pid; \
+		for i in $$(seq 1 40); do \
+			if $(CURL) -fsS "http://127.0.0.1:8090/healthz" >/dev/null 2>&1; then \
+				break; \
+			fi; \
+			sleep 1; \
+		done; \
+		if ! $(CURL) -fsS "http://127.0.0.1:8090/healthz" >/dev/null 2>&1; then \
+			echo "run-dev: erp read failed to start"; \
+			sed -n '1,160p' "$(ERP_READ_DEV_LOG)"; \
+			exit 1; \
+		fi; \
+			. "$(CURDIR)/bot/.env"; \
+			env MOBILE_API_ADDR="$(MOBILE_API_ADDR)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$(POLYGON_HTTP_ADDR)" ERP_READ_URL="$(ERP_READ_URL)" ERP_URL="$$ERP_URL" ERP_API_KEY="$$ERP_API_KEY" ERP_API_SECRET="$$ERP_API_SECRET" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
+			MOBILEAPI_PID=$$!; \
+		echo "$$MOBILEAPI_PID" >/tmp/gscale-zebra/mobileapi.pid; \
 	for i in $$(seq 1 40); do \
 		if $(CURL) -fsS "http://127.0.0.1:8081/healthz" >/dev/null 2>&1; then \
 			break; \
@@ -162,7 +188,8 @@ run-dev: fresh-bridge-state
 			exit 1; \
 		fi; \
 		rm -f "$(SCALE_DEV_LAUNCH_LOG)"; \
-		script -q "$(SCALE_DEV_LAUNCH_LOG)" zsh -lc 'cd "$(CURDIR)/scale" && exec go run . --no-bot --no-zebra --bridge-url "http://$(POLYGON_HTTP_ADDR)/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)"' >/dev/null 2>&1 & \
+		SCALE_CMD='cd "$(CURDIR)/scale" && exec go run . --no-bot --no-zebra --bridge-url "http://$(POLYGON_HTTP_ADDR)/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)"'; \
+		script -q -e -c "$$SCALE_CMD" "$(SCALE_DEV_LAUNCH_LOG)" >/dev/null 2>&1 & \
 		SCALE_PID=$$!; \
 		echo "$$SCALE_PID" >/tmp/gscale-zebra/scale.pid; \
 		sleep 2; \
@@ -171,21 +198,25 @@ run-dev: fresh-bridge-state
 			sed -n '1,160p' "$(SCALE_DEV_LAUNCH_LOG)"; \
 			exit 1; \
 		fi; \
-		printf '[run-dev] 1/3 simulator ready: http://%s\n' "$(POLYGON_HTTP_ADDR)"; \
-		printf '[run-dev] 2/3 mobileapi ready: http://127.0.0.1:8081\n'; \
-		printf '[run-dev] 3/3 core ready:      scale running in background\n'; \
+		printf '[run-dev] 1/4 simulator ready: http://%s\n' "$(POLYGON_HTTP_ADDR)"; \
+		printf '[run-dev] 2/4 erp read ready:  http://127.0.0.1:8090\n'; \
+		printf '[run-dev] 3/4 mobileapi ready: http://127.0.0.1:8081\n'; \
+		printf '[run-dev] 4/4 core ready:      scale running in background\n'; \
 		printf '[run-dev] live logs: scale print_request + polygon fake zebra\n'; \
 		start_tail /tmp/gscale-zebra/polygon.log polygon; \
+		start_tail "$(ERP_READ_DEV_LOG)" erp.read; \
 		start_tail "$(CURDIR)/logs/scale/worker.print_request.log" scale.print_request; \
 		while :; do sleep 1; done
 
 stop-dev-services:
 	@if [ -f /tmp/gscale-zebra/scale.pid ]; then kill $$(cat /tmp/gscale-zebra/scale.pid) 2>/dev/null || true; fi
+	@if [ -f /tmp/gscale-zebra/erp-read.pid ]; then kill $$(cat /tmp/gscale-zebra/erp-read.pid) 2>/dev/null || true; fi
 	@if [ -f /tmp/gscale-zebra/mobileapi.pid ]; then kill $$(cat /tmp/gscale-zebra/mobileapi.pid) 2>/dev/null || true; fi
 	@if [ -f /tmp/gscale-zebra/polygon.pid ]; then kill $$(cat /tmp/gscale-zebra/polygon.pid) 2>/dev/null || true; fi
+	@pgrep -f '[/]tmp/gscale-zebra/erp-read-dev' | xargs -r kill 2>/dev/null || true
 	@pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true
 	@pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true
-	@rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid
+	@rm -f /tmp/gscale-zebra/erp-read.pid /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid
 
 stop-bot-services:
 	@pkill -f '[g]o run ./cmd/bot' 2>/dev/null || true

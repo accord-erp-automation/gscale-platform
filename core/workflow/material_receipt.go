@@ -8,6 +8,7 @@ import (
 )
 
 const maxDuplicateBarcodeRetries = 5
+const minBatchQtyKg = 0.100
 
 func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, hooks Hooks) error {
 	if r == nil {
@@ -63,6 +64,25 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 			strings.TrimSpace(reading.Unit),
 			reading.UpdatedAt.Format(timeRFC3339Nano),
 		)
+		if reading.Qty < minBatchQtyKg {
+			r.logf(
+				"batch qty ignored: item=%s warehouse=%s qty=%.3f below min=%.3f",
+				selection.ItemCode,
+				selection.Warehouse,
+				reading.Qty,
+				minBatchQtyKg,
+			)
+			r.reportProgress(hooks, Progress{
+				Selection:   selection,
+				DraftCount:  draftCount,
+				LastSuccess: lastSuccess,
+				Note:        fmt.Sprintf("QTY juda kichik: %.3f kg | min %.3f kg", reading.Qty, minBatchQtyKg),
+			})
+			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
+				return nil
+			}
+			continue
+		}
 
 		epc, draft, err := createDraftWithFreshEPC(
 			func() string {

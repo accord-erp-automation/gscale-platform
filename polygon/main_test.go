@@ -145,6 +145,12 @@ func TestTickCompletesPendingPrintRequest(t *testing.T) {
 	if snap.Zebra.Verify != "WRITTEN" {
 		t.Fatalf("zebra verify = %q", snap.Zebra.Verify)
 	}
+	if snap.Zebra.DeviceState != "ready" {
+		t.Fatalf("zebra device state = %q", snap.Zebra.DeviceState)
+	}
+	if snap.Zebra.MediaState != "ok" {
+		t.Fatalf("zebra media state = %q", snap.Zebra.MediaState)
+	}
 	if len(sim.printerHistory) != 1 {
 		t.Fatalf("printer history len = %d", len(sim.printerHistory))
 	}
@@ -177,7 +183,7 @@ func TestDefaultCycleHasBurstAndPausePattern(t *testing.T) {
 		if !frame.stable && frame.weight > 0 && frame.duration <= 250*time.Millisecond {
 			hasFastBurst = true
 		}
-		if frame.stable && frame.duration >= 1500*time.Millisecond {
+		if frame.stable && frame.weight > 0 && frame.duration >= 4500*time.Millisecond {
 			hasStablePause = true
 		}
 		if frame.weight == 0 && frame.duration >= 900*time.Millisecond {
@@ -193,5 +199,19 @@ func TestDefaultCycleHasBurstAndPausePattern(t *testing.T) {
 	}
 	if !hasZeroPause {
 		t.Fatal("cycle should have zero-weight pause frames")
+	}
+}
+
+func TestBatchFlowStableFramesDoNotProduceTinyPositiveWeights(t *testing.T) {
+	t.Parallel()
+
+	cycle := buildScenarioCycle("batch-flow", 42)
+	if len(cycle) == 0 {
+		t.Fatal("batch-flow cycle is empty")
+	}
+	for _, frame := range cycle {
+		if frame.stable && frame.weight > 0 && frame.weight < 0.05 {
+			t.Fatalf("stable frame should not have tiny positive weight: %.3f", frame.weight)
+		}
 	}
 }

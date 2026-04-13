@@ -6,7 +6,7 @@ This workspace currently matters across three local codebases:
 
 - `gscale-zebra`
 - `erp_scz_db_reader` at `/home/wikki/storage/local.git/erpnext_n1/erp/gscale_erp_read`
-- the current mobile app checkout at `/home/wikki/storage/local.git/erpnext_stock_telegram/mobile_app`
+- the current mobile app checkout at `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2`
 
 The ERP bench itself is at:
 
@@ -14,14 +14,13 @@ The ERP bench itself is at:
 
 The mobile app checkout now tracks:
 
-- `origin = git@github.com:WIKKIwk/hard_con_v2.git`
-- `legacy-origin = git@github.com:WIKKIwk/ERP_mobile.git`
+- `origin = https://github.com/WIKKIwk/hard_con_v2.git`
 
 ## Current Repo State
 
 - `gscale-zebra`
   - branch: `main`
-  - HEAD: `4dc076f` (`Stop Material Receipt from starting batch`)
+  - HEAD: `2b3442c` (`Refresh scale dev runtime logs`)
   - `origin/main` is the same commit
   - working tree may look dirty because live processes are currently writing log files
 
@@ -31,11 +30,11 @@ The mobile app checkout now tracks:
   - ahead of `origin/main` by 1 commit
   - not pushed yet
 
-- `mobile_app` checkout
-  - path: `/home/wikki/storage/local.git/erpnext_stock_telegram/mobile_app`
+- `hard_con_v2` checkout
+  - path: `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2`
   - branch: `main`
-  - HEAD: `70dc1e1` (`Split dashboard and add control panel`)
-  - synced with `hard_con_v2`
+  - HEAD: `a5ae288` (`Polish mobile control flow and remove line tab`)
+  - synced with `origin/main`
 
 ## Active Local Processes Right Now
 
@@ -172,11 +171,55 @@ Relevant commits:
 - `cc4e23d` `Require explicit batch start after selection`
 - `4dc076f` `Stop Material Receipt from starting batch`
 
+### 6. Shared batch workflow core and mobile control endpoints landed
+
+The batch orchestration was pulled toward a shared core instead of living only in Telegram bot handlers.
+
+Important recent commits:
+
+- `ed73cb0` `Rewrite agent handoff for current architecture`
+- `f10cab5` `Extract shared batch control and workflow core`
+- `eeffe24` `Add mobileapi batch control endpoints`
+- `05650db` `Wire ERP read service into dev stack`
+- `2b3442c` `Refresh scale dev runtime logs`
+
+Current shape:
+
+- the shared batch workflow/core layer is now the intended owner for reusable orchestration
+- `mobileapi` now has batch control endpoints for the mobile/web clients
+- the Telegram bot should keep getting thinner over time instead of owning every workflow detail
+
+### 7. Mobile app was split into its own checkout and synced with `hard_con_v2`
+
+The mobile app now lives in a dedicated checkout:
+
+- `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2`
+
+Important recent commits in that repo:
+
+- `70dc1e1` `Split dashboard and add control panel`
+- `0c75bdc` `Connect mobile app to mobileapi batch control`
+- `4a15be1` `Polish control workflow and iOS run target`
+- `614bf46` `Fix iPhone Wi-Fi server discovery`
+- `990a6fa` `Refine mobile search UX and add iOS IPA workflow`
+- `a5ae288` `Polish mobile control flow and remove line tab`
+
+Important behavior now:
+
+- the mobile app uses `mobileapi` batch control endpoints
+- iOS Wi-Fi discovery is tuned for local network server detection
+- the checkout origin points at `hard_con_v2`
+- item selection now uses a modal picker flow instead of a persistent inline list
+- warehouse selection now uses the same modal picker pattern
+- the `Line` tab was removed; bottom navigation is now `Control` and `Server`
+- ping is shown in the app bar on the control screen
+- GitHub Actions now includes an unsigned iOS `.ipa` artifact workflow
+
 ## Important Current Behavior
 
 ### Telegram bot logic owner
 
-Right now the Telegram bot still owns the real orchestration logic:
+Right now the Telegram bot still owns the user-facing orchestration path, but the reusable core is being extracted out:
 
 - wait for stable positive qty
 - create EPC
@@ -190,7 +233,7 @@ This logic currently lives primarily in:
 - `/home/wikki/storage/local.git/gscale-zebra/bot/internal/app/callback_handler.go`
 - `/home/wikki/storage/local.git/gscale-zebra/bot/internal/batchstate/store.go`
 
-### Mobile API is still mostly monitor/read API
+### Mobile API now exposes batch control endpoints
 
 `mobileapi` currently provides:
 
@@ -200,19 +243,26 @@ This logic currently lives primarily in:
 - profile
 - monitor snapshot
 - monitor stream
-
-It does **not** yet expose real control endpoints for:
-
-- item selection
-- warehouse selection
+- item search
+- warehouse shortlist
+- batch state
 - batch start
 - batch stop
-- orchestration actions
 
 Relevant files:
 
 - `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/server.go`
 - `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/config.go`
+
+### Mobile client UI direction
+
+Current mobile UX is intentionally narrower now:
+
+- `Control` is the main operational screen
+- `Server` remains for connection and backend health context
+- `Line` was removed from the bottom navigation because it was redundant
+- product and warehouse are selected through modal pickers
+- the control screen should stay compact and avoid persistent suggestion lists in-page
 
 ## Most Important Architecture Direction
 
@@ -234,19 +284,14 @@ That means:
 
 ### Main next task
 
-Use the current `mobileapi` as the HTTP entrypoint for mobile/web control, but only after extracting the batch orchestration into a reusable core/application layer.
+Keep the shared workflow/core layer as the main orchestration owner, and keep the Telegram bot and mobile app as thin clients over it.
 
 ### Recommended sequence
 
-1. Extract a shared batch workflow service out of bot orchestration code.
+1. Move any remaining batch orchestration out of bot handlers and into the shared service layer.
 2. Keep Telegram bot as a thin client over that service.
-3. Add control endpoints to `mobileapi` for:
-   - item search
-   - warehouse shortlist
-   - batch state
-   - batch start
-   - batch stop
-4. Make the mobile app consume those endpoints.
+3. Keep `mobileapi` aligned with the shared workflow contract.
+4. Keep the mobile app synced to the `hard_con_v2` checkout and its control workflow.
 
 ### Suggested first control endpoints
 
@@ -261,8 +306,9 @@ Use the current `mobileapi` as the HTTP entrypoint for mobile/web control, but o
 - There are live local processes right now. Stop them before doing runtime debugging.
 - `bot/.env` is local and untracked. Do not accidentally commit secrets.
 - `erp_scz_db_reader` has an unpushed commit (`cb27235`). Keep that in mind if the next agent changes the service again.
-- The mobile app checkout is not inside this repo; it lives at `/home/wikki/storage/local.git/erpnext_stock_telegram/mobile_app`.
+- The mobile app checkout is inside this repo now at `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2`.
 - `Material Receipt` must not start batch anymore. Only `Batch Start` is allowed to do that.
+- `hard_con_v2` now has a GitHub Actions workflow at `.github/workflows/ios-unsigned-ipa.yml` that builds an unsigned `.ipa` artifact on push.
 
 ## Good Starting Files For The Next Agent
 
@@ -271,3 +317,6 @@ Use the current `mobileapi` as the HTTP entrypoint for mobile/web control, but o
 - `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/server.go`
 - `/home/wikki/storage/local.git/gscale-zebra/internal/mobileapi/config.go`
 - `/home/wikki/storage/local.git/erpnext_n1/erp/gscale_erp_read/internal/store/store.go`
+- `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2/lib/main.dart`
+- `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2/Makefile`
+- `/home/wikki/storage/local.git/gscale-zebra/hard_con_v2/.github/workflows/ios-unsigned-ipa.yml`
