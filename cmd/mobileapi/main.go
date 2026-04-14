@@ -39,6 +39,12 @@ func main() {
 		}
 	}()
 
+	go func() {
+		if err := srv.ListenAndServeBonjour(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("mobile API bonjour warning: %v", err)
+		}
+	}()
+
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
