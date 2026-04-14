@@ -46,7 +46,7 @@ Bitta integrallashgan tizim yaratish:
 ## 2. Tizim arxitekturasi
 Loyiha `go.work` asosida 5 asosiy moduldan tashkil topgan:
 
-- `scale`: real-time worker + TUI, scale va Zebra monitor orchestration.
+- `scale`: real-time worker, scale va Zebra monitor orchestration.
 - `bot`: Telegram bot, ERP integratsiyasi, batch session boshqaruvi.
 - `bridge`: umumiy state (`JSON`) uchun atomar store.
 - `core`: barqaror qty asosida EPC trigger logikasi.
@@ -75,7 +75,7 @@ Asosiy vazifalar:
 - scale frame parsing (`kg/g/lb/oz`, minus formatlar, stable/unstable markerlar);
 - serial ishlamasa HTTP bridge fallback o'qish;
 - Zebra holatini polling qilish;
-- TUI orqali operator interfeysi (`q`, `e`, `r`);
+- headless worker rejimi orqali operator oqimini yuritish;
 - bridge state'ga `scale` va `zebra` snapshot yozish;
 - bridge state'dagi `print_request` buyruqlarini kuzatish va printerga ijro qilish.
 
@@ -303,7 +303,7 @@ Asosiy flaglar:
 
 ## 9. Buyruqlar va boshqaruv
 ### 9.1 Make targetlar
-- `make run`: scale TUI (bot auto-start bilan)
+- `make run`: scale worker (bot auto-start bilan)
 - `make run-scale`: faqat scale
 - `make run-bot`: faqat bot
 - `make test`: barcha modul testlari
@@ -315,10 +315,8 @@ Asosiy flaglar:
 - `/log`: workflow log fayllarini yuborish
 - `/epc`: session bo'yicha EPC ro'yxatini `.txt` yuborish
 
-### 9.3 Scale TUI tugmalari
-- `q`: chiqish
-- `e`: qo'lda encode+print
-- `r`: qo'lda RFID read
+### 9.3 Scale worker
+Scale endi terminal TUI’siz ishlaydi; operator interfeysi mobile app yoki bot orqali boshqariladi.
 
 ### 9.4 Zebra utilita
 ```bash

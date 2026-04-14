@@ -1,4 +1,4 @@
-# Scale monitor (TUI + Zebra) 📟
+# Scale monitor (headless + Zebra) 📟
 
 `scale` moduli USB serial tarozi oqimini o'qiydi, Zebra holatini kuzatadi va bridge state orqali kelgan `print_request` buyruqlarini bajaradi.
 
@@ -9,11 +9,7 @@ cd /home/wikki/local.git/gscale-zebra/scale
 go run .
 ```
 
-TUI tugmalari:
-
-- `q` - chiqish
-- `e` - qo'lda encode+print yuborish
-- `r` - RFID read yuborish
+`scale` hozir headless ishlaydi, shuning uchun terminal TUI tugmalari yo'q.
 
 ## Boot'da auto-start (systemd) 🚀
 
@@ -51,7 +47,7 @@ Bot tomonda:
 - `Material Receipt` => `batch.active=true`
 - `Batch Stop` => `batch.active=false`
 
-Scale TUI bu holatni `BATCH: ACTIVE/STOPPED` sifatida ko'rsatadi.
+Scale bu holatni log va bridge snapshot orqali ko'rsatadi.
 
 ## Bot auto-start
 
@@ -75,7 +71,7 @@ go run . --no-bot
 - `--no-bridge` - HTTP fallback'ni o'chiradi
 - `--zebra-device` (example: `/dev/usb/lp0`) - printer path
 - `--zebra-interval` (default: `900ms`) - Zebra monitor interval
-- `--no-zebra` - Zebra monitor va `e/r` actionlarni o'chiradi
+- `--no-zebra` - Zebra monitor va printer actionlarini o'chiradi
 - `--bot-dir` (default: `../bot`) - bot modul yo'li
 - `--no-bot` - bot auto-startni o'chiradi
 - `--bridge-state-file` - shared snapshot fayli
