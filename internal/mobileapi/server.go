@@ -129,16 +129,19 @@ func (s *Server) handleHandshake(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
+	profile := s.currentProfile()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":               true,
 		"service":          "mobileapi",
 		"app":              "gscale-zebra",
 		"server_name":      s.cfg.ServerName,
-		"server_ref":       s.currentProfile().Ref,
-		"display_name":     s.currentProfile().DisplayName,
-		"role":             s.currentProfile().Role,
-		"phone":            s.currentProfile().Phone,
+		"server_ref":       profile.Ref,
+		"display_name":     profile.DisplayName,
+		"role":             profile.Role,
+		"phone":            profile.Phone,
+		"http_port":        httpPortFromListenAddr(s.cfg.ListenAddr),
+		"discovery_port":   httpPortFromListenAddr(s.cfg.DiscoveryAddr),
 		"monitor_path":     "/v1/mobile/monitor/state",
 		"profile_path":     "/v1/mobile/profile",
 		"items_path":       "/v1/mobile/items",
