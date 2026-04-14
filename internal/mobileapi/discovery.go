@@ -15,14 +15,15 @@ const discoveryProbeV1 = "GSCALE_DISCOVER_V1"
 const discoveryAnnounceInterval = 250 * time.Millisecond
 
 type discoveryAnnouncement struct {
-	Type        string `json:"type"`
-	App         string `json:"app"`
-	Service     string `json:"service"`
-	ServerName  string `json:"server_name"`
-	ServerRef   string `json:"server_ref"`
-	DisplayName string `json:"display_name"`
-	Role        string `json:"role"`
-	HTTPPort    int    `json:"http_port"`
+	Type           string `json:"type"`
+	App            string `json:"app"`
+	Service        string `json:"service"`
+	ServerName     string `json:"server_name"`
+	ServerRef      string `json:"server_ref"`
+	DisplayName    string `json:"display_name"`
+	Role           string `json:"role"`
+	HTTPPort       int    `json:"http_port"`
+	CandidatePorts []int  `json:"candidate_ports,omitempty"`
 }
 
 func (s *Server) ListenAndServeDiscovery(ctx context.Context) error {
@@ -77,14 +78,15 @@ func (s *Server) ListenAndServeDiscovery(ctx context.Context) error {
 func (s *Server) discoveryAnnouncementPayload() ([]byte, error) {
 	profile := s.currentProfile()
 	return json.Marshal(discoveryAnnouncement{
-		Type:        "gscale_announce_v1",
-		App:         "gscale-zebra",
-		Service:     "mobileapi",
-		ServerName:  s.cfg.ServerName,
-		ServerRef:   profile.Ref,
-		DisplayName: profile.DisplayName,
-		Role:        profile.Role,
-		HTTPPort:    httpPortFromListenAddr(s.cfg.ListenAddr),
+		Type:           "gscale_announce_v1",
+		App:            "gscale-zebra",
+		Service:        "mobileapi",
+		ServerName:     s.cfg.ServerName,
+		ServerRef:      profile.Ref,
+		DisplayName:    profile.DisplayName,
+		Role:           profile.Role,
+		HTTPPort:       httpPortFromListenAddr(s.cfg.ListenAddr),
+		CandidatePorts: append([]int(nil), s.cfg.CandidatePorts...),
 	})
 }
 
@@ -183,23 +185,23 @@ func enableUDPBroadcast(conn *net.UDPConn) error {
 func httpPortFromListenAddr(addr string) int {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
-		return 8081
+		return defaultPrimaryMobileAPIPort()
 	}
 	if strings.HasPrefix(addr, ":") {
 		port, err := strconv.Atoi(strings.TrimPrefix(addr, ":"))
 		if err == nil && port > 0 {
 			return port
 		}
-		return 8081
+		return defaultPrimaryMobileAPIPort()
 	}
 
 	_, portText, err := net.SplitHostPort(addr)
 	if err != nil {
-		return 8081
+		return defaultPrimaryMobileAPIPort()
 	}
 	port, err := strconv.Atoi(strings.TrimSpace(portText))
 	if err != nil || port <= 0 {
-		return 8081
+		return defaultPrimaryMobileAPIPort()
 	}
 	return port
 }

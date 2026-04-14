@@ -9,7 +9,8 @@ POLYGON_SEED ?= 42
 RUN_DEV_PORT_SCAN ?= 40
 APP_USER ?= $(shell id -un)
 APP_GROUP ?= $(shell id -gn)
-MOBILE_API_ADDR ?= 0.0.0.0:8081
+MOBILE_API_CANDIDATE_PORTS ?= 39117,41257,43391,45533,47681
+MOBILE_API_BIND_HOST ?= 0.0.0.0
 MOBILE_API_SERVER_NAME ?= $(shell hostname)
 RUN_DEV_CORE_ENV ?= /tmp/gscale-zebra/mobileapi-dev.core.env
 CURL ?= curl
@@ -17,7 +18,8 @@ POLYGON_DEV_BIN ?= /tmp/gscale-zebra/polygon-dev
 MOBILEAPI_DEV_BIN ?= /tmp/gscale-zebra/mobileapi-dev
 SCALE_DEV_LAUNCH_LOG ?= /tmp/gscale-zebra/scale-dev.log
 MOBILE_APP_DIR ?= /home/wikki/storage/local.git/erpnext_stock_telegram/mobile_app
-MOBILE_API_PORT ?= $(shell printf '%s\n' "$(MOBILE_API_ADDR)" | awk -F: '{print $$NF}')
+MOBILE_API_PORT ?= $(shell printf '%s\n' "$(MOBILE_API_CANDIDATE_PORTS)" | awk -F, '{gsub(/[[:space:]]/, "", $$1); print $$1}')
+MOBILE_API_ADDR ?= $(MOBILE_API_BIND_HOST):$(MOBILE_API_PORT)
 MOBILE_API_BASE_URL ?= http://127.0.0.1:$(MOBILE_API_PORT)
 MOBILE_RUN_TARGET ?= run-auto
 MOBILE_FLUTTER_RUN_ARGS ?= --dart-define=API_BASE_URL=$(MOBILE_API_BASE_URL)
@@ -56,7 +58,7 @@ help:
 	@echo "Override:"
 	@echo "  make run SCALE_DEVICE=/dev/ttyUSB1 ZEBRA_DEVICE=/dev/usb/lp0"
 	@echo "  make run-polygon SCENARIO=stress"
-	@echo "  make run-mobile MOBILE_API_BASE_URL=http://127.0.0.1:8081"
+	@echo "  make run-mobile MOBILE_API_BASE_URL=http://127.0.0.1:39117"
 	@echo "  make run-mobile-android MOBILE_APP_DIR=/path/to/mobile_app"
 
 check-env:
@@ -121,6 +123,27 @@ run-dev: fresh-bridge-state
 	addr_port() { printf '%s\n' "$$1" | awk -F: '{print $$NF}'; }; \
 	connect_host() { case "$$1" in ''|0.0.0.0) printf '127.0.0.1' ;; *) printf '%s' "$$1" ;; esac; }; \
 	port_is_busy() { lsof -nP -iTCP:"$$1" -sTCP:LISTEN >/dev/null 2>&1; }; \
+	first_csv_value() { \
+		printf '%s\n' "$$1" | awk -F, '{gsub(/[[:space:]]/, "", $$1); print $$1}'; \
+	}; \
+	pick_first_free_csv() { \
+		CSV="$$1"; \
+		OLD_IFS="$$IFS"; \
+		IFS=,; \
+		set -- $$CSV; \
+		IFS="$$OLD_IFS"; \
+		for PORT in "$$@"; do \
+			PORT=$$(printf '%s' "$$PORT" | tr -d '[:space:]'); \
+			if [ -z "$$PORT" ]; then \
+				continue; \
+			fi; \
+			if ! port_is_busy "$$PORT"; then \
+				printf '%s' "$$PORT"; \
+				return 0; \
+			fi; \
+		done; \
+		return 1; \
+	}; \
 	pick_free_port() { \
 		PORT="$$1"; \
 		TRIES=0; \
@@ -156,12 +179,12 @@ run-dev: fresh-bridge-state
 	if [ "$$POLYGON_ADDR" != "$(POLYGON_HTTP_ADDR)" ]; then \
 		printf '[run-dev] polygon port busy, using %s\n' "$$POLYGON_ADDR"; \
 	fi; \
-	MOBILE_API_BIND_HOST=$$(addr_host "$(MOBILE_API_ADDR)"); \
-	MOBILE_API_BASE_PORT=$$(addr_port "$(MOBILE_API_ADDR)"); \
-	MOBILE_API_PORT=$$(pick_free_port "$$MOBILE_API_BASE_PORT") || { echo "run-dev: mobileapi free port topilmadi"; exit 1; }; \
+	MOBILE_API_PRIMARY_PORT=$$(first_csv_value "$(MOBILE_API_CANDIDATE_PORTS)"); \
+	MOBILE_API_BIND_HOST="$(MOBILE_API_BIND_HOST)"; \
+	MOBILE_API_PORT=$$(pick_first_free_csv "$(MOBILE_API_CANDIDATE_PORTS)") || { echo "run-dev: mobileapi candidate ports band"; exit 1; }; \
 	MOBILE_API_CONNECT_HOST=$$(connect_host "$$MOBILE_API_BIND_HOST"); \
 	MOBILE_API_ADDR_RESOLVED="$$MOBILE_API_BIND_HOST:$$MOBILE_API_PORT"; \
-	if [ "$$MOBILE_API_ADDR_RESOLVED" != "$(MOBILE_API_ADDR)" ]; then \
+	if [ "$$MOBILE_API_PORT" != "$$MOBILE_API_PRIMARY_PORT" ]; then \
 		printf '[run-dev] mobileapi port busy, using %s\n' "$$MOBILE_API_ADDR_RESOLVED"; \
 	fi; \
 	"$(POLYGON_DEV_BIN)" --http-addr "$$POLYGON_ADDR" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" >/tmp/gscale-zebra/polygon.log 2>&1 & \
@@ -178,7 +201,7 @@ run-dev: fresh-bridge-state
 		sed -n '1,160p' /tmp/gscale-zebra/polygon.log; \
 		exit 1; \
 	fi; \
-	env MOBILE_API_ADDR="$$MOBILE_API_ADDR_RESOLVED" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" MOBILE_API_SETUP_FILE="$$DEV_CORE_ENV_FILE" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
+	env MOBILE_API_ADDR="$$MOBILE_API_ADDR_RESOLVED" MOBILE_API_CANDIDATE_PORTS="$(MOBILE_API_CANDIDATE_PORTS)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" MOBILE_API_SETUP_FILE="$$DEV_CORE_ENV_FILE" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
 	MOBILEAPI_PID=$$!; \
 	echo "$$MOBILEAPI_PID" >/tmp/gscale-zebra/mobileapi.pid; \
 	for i in $$(seq 1 40); do \

@@ -142,6 +142,7 @@ func (s *Server) handleHandshake(w http.ResponseWriter, r *http.Request) {
 		"phone":            profile.Phone,
 		"http_port":        httpPortFromListenAddr(s.cfg.ListenAddr),
 		"discovery_port":   httpPortFromListenAddr(s.cfg.DiscoveryAddr),
+		"candidate_ports":  append([]int(nil), s.cfg.CandidatePorts...),
 		"monitor_path":     "/v1/mobile/monitor/state",
 		"profile_path":     "/v1/mobile/profile",
 		"items_path":       "/v1/mobile/items",

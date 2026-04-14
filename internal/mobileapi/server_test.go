@@ -94,6 +94,9 @@ func TestHandshakeReturnsServerIdentity(t *testing.T) {
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"app":"gscale-zebra"`)) {
 		t.Fatalf("handshake body = %s", rec.Body.String())
 	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"candidate_ports"`)) {
+		t.Fatalf("handshake body = %s", rec.Body.String())
+	}
 }
 
 func TestMonitorStateReturnsBridgeSnapshot(t *testing.T) {

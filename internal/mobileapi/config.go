@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	defaultListenAddr      = ":8081"
 	defaultDiscoveryAddr   = ":18081"
 	defaultBridgeStateFile = "/tmp/gscale-zebra/bridge_state.json"
 	defaultProfileFile     = "/tmp/gscale-zebra/mobile_profile.json"
@@ -22,6 +21,7 @@ type Config struct {
 	BridgeStateFile string
 	ProfileFile     string
 	SetupFile       string
+	CandidatePorts  []int
 	PolygonURL      string
 	ERPURL          string
 	ERPReadURL      string
@@ -56,13 +56,20 @@ func LoadConfig() Config {
 		defaultSetupFile,
 	)
 	coreCfg, _ := runtimecfg.Load(setupFile)
+	candidatePorts := parseMobileAPICandidatePorts(os.Getenv("MOBILE_API_CANDIDATE_PORTS"))
+	listenAddr := selectMobileAPIListenAddr(
+		os.Getenv("MOBILE_API_ADDR"),
+		firstNonEmpty(os.Getenv("MOBILE_API_BIND_HOST"), defaultMobileAPIBindHost()),
+		candidatePorts,
+	)
 
 	return Config{
-		ListenAddr:      firstNonEmpty(os.Getenv("MOBILE_API_ADDR"), defaultListenAddr),
+		ListenAddr:      listenAddr,
 		DiscoveryAddr:   firstNonEmpty(os.Getenv("MOBILE_API_DISCOVERY_ADDR"), defaultDiscoveryAddr),
 		BridgeStateFile: firstNonEmpty(os.Getenv("BRIDGE_STATE_FILE"), defaultBridgeStateFile),
 		ProfileFile:     firstNonEmpty(os.Getenv("MOBILE_API_PROFILE_FILE"), defaultProfileFile),
 		SetupFile:       setupFile,
+		CandidatePorts:  candidatePorts,
 		PolygonURL:      firstNonEmpty(os.Getenv("POLYGON_URL"), defaultPolygonURL),
 		ERPURL:          firstNonEmpty(os.Getenv("ERP_URL"), coreCfg.ERPURL),
 		ERPReadURL:      firstNonEmpty(os.Getenv("ERP_READ_URL"), coreCfg.ERPReadURL),
