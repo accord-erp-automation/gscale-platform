@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 type printRequestDecision string
@@ -62,59 +60,11 @@ func writePrintRequestStatus(store *bridgestate.Store, epc, status, errText stri
 	})
 }
 
-func (m *tuiModel) syncPendingPrintRequest(now time.Time) tea.Cmd {
-	if m == nil || m.printRequest == nil {
-		return nil
-	}
-
-	req, ok := m.printRequest.Pending(now)
-	if !ok {
-		return nil
-	}
-
-	lg := workerLog("worker.print_request")
-	epc := strings.ToUpper(strings.TrimSpace(req.EPC))
-	qtyText := formatQty(req.Qty, req.Unit)
-	itemLabel := strings.TrimSpace(req.ItemName)
-	if itemLabel == "" {
-		itemLabel = strings.TrimSpace(req.ItemCode)
-	}
-	switch decidePendingPrintRequest(req, m.zebra, m.activePrintRequestEPC, m.zebraUpdates != nil, m.last) {
-	case printRequestMarkDone:
-		lg.Printf("request already satisfied: epc=%s item=%s qty=%s", epc, itemLabel, qtyText)
-		if err := writePrintRequestStatus(m.bridgeStore, epc, "done", ""); err != nil {
-			m.info = "print request status xato: " + err.Error()
-			return nil
-		}
-		m.info = "print request already satisfied: epc=" + epc
-		return nil
-	case printRequestErrorDisabled:
-		lg.Printf("request blocked: zebra disabled epc=%s item=%s qty=%s", epc, itemLabel, qtyText)
-		if err := writePrintRequestStatus(m.bridgeStore, epc, "error", "zebra disabled"); err != nil {
-			m.info = "print request status xato: " + err.Error()
-			return nil
-		}
-		m.info = "print request xato: zebra disabled"
-		return nil
-	case printRequestExternalExec:
-		lg.Printf("request delegated: polygon fake zebra will handle epc=%s item=%s qty=%s", epc, itemLabel, qtyText)
-		m.info = "print request delegated to polygon: epc=" + epc
-		return nil
-	case printRequestExecute:
-		lg.Printf("request queued: epc=%s item=%s qty=%s -> fake zebra encode", epc, itemLabel, qtyText)
-		if err := writePrintRequestStatus(m.bridgeStore, epc, "processing", ""); err != nil {
-			m.info = "print request status xato: " + err.Error()
-			return nil
-		}
-		m.activePrintRequestEPC = epc
-		m.info = "bridge print request queued: epc=" + epc
-		return runEncodeEPCCmdWithEPC(m.zebraPreferred, epc, req.Qty, req.Unit, req.ItemName)
-	default:
-		return nil
-	}
+func formatQty(qty *float64, unit string) string {
+	return formatLabelQty(qty, unit)
 }
 
-func formatQty(qty *float64, unit string) string {
+func formatLabelQty(qty *float64, unit string) string {
 	u := strings.TrimSpace(unit)
 	if u == "" {
 		u = "kg"

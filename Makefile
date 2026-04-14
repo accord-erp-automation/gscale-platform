@@ -26,11 +26,11 @@ MOBILE_FLUTTER_RUN_ARGS ?= --dart-define=API_BASE_URL=$(MOBILE_API_BASE_URL)
 
 help:
 	@echo "Targets:"
-	@echo "  make run        - scale TUI ni ishga tushiradi (bot auto-start bilan)"
-	@echo "  make run-scale  - faqat scale TUI (bot auto-startsiz)"
+	@echo "  make run        - scale worker ni ishga tushiradi (bot auto-start bilan)"
+	@echo "  make run-scale  - faqat scale worker (bot auto-startsiz)"
 	@echo "  make run-bot    - faqat telegram bot"
 	@echo "  make run-polygon - real qurilmasiz polygon simulator"
-	@echo "  make run-test   - polygon + scale TUI (qurilmasiz core test)"
+	@echo "  make run-test   - polygon + scale worker (qurilmasiz core test)"
 	@echo "  make run-dev    - backend/core dev stack: polygon + mobileapi + scale (no erp-read)"
 	@echo "  make run-mobile - Flutter mobile client (default: auto device)"
 	@echo "  make run-mobile-android - Flutter mobile client Android uchun"
@@ -194,7 +194,7 @@ run-dev: fresh-bridge-state
 	fi; \
 	rm -f "$(SCALE_DEV_LAUNCH_LOG)"; \
 	touch "$(SCALE_DEV_LAUNCH_LOG)"; \
-	( cd "$(CURDIR)/scale" && exec go run . --no-tui --no-bot --no-zebra --bridge-url "http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)" ) >"$(SCALE_DEV_LAUNCH_LOG)" 2>&1 & \
+	( cd "$(CURDIR)/scale" && exec go run . --no-bot --no-zebra --bridge-url "http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)" ) >"$(SCALE_DEV_LAUNCH_LOG)" 2>&1 & \
 	SCALE_PID=$$!; \
 	echo "$$SCALE_PID" >/tmp/gscale-zebra/scale.pid; \
 	sleep 2; \

@@ -31,7 +31,6 @@ func main() {
 
 	updates := make(chan Reading, 32)
 	var zebraUpdates <-chan ZebraStatus
-	var sourceLine string
 	var serialErr error
 	started := false
 
@@ -39,7 +38,6 @@ func main() {
 	if err == nil {
 		if startErr := startSerialReader(ctx, port, usedBaud, cfg.unit, updates); startErr == nil {
 			workerLog("main").Printf("serial reader started: device=%s baud=%d", port, usedBaud)
-			sourceLine = fmt.Sprintf("serial (%s @ %d)", port, usedBaud)
 			started = true
 		} else {
 			workerLog("main").Printf("serial reader start error: %v", startErr)
@@ -53,7 +51,6 @@ func main() {
 	if !started && !cfg.disableBridge && strings.TrimSpace(cfg.bridgeURL) != "" {
 		startBridgeReader(ctx, strings.TrimSpace(cfg.bridgeURL), cfg.bridgeInterval, updates)
 		workerLog("main").Printf("bridge reader started: url=%s", strings.TrimSpace(cfg.bridgeURL))
-		sourceLine = fmt.Sprintf("bridge (%s)", strings.TrimSpace(cfg.bridgeURL))
 		started = true
 	}
 
@@ -88,14 +85,8 @@ func main() {
 		}
 	}
 
-	runFn := runTUI
-	runName := "tui"
-	if cfg.disableTUI {
-		runFn = runHeadless
-		runName = "headless"
-	}
-	if err := runFn(ctx, updates, zebraUpdates, sourceLine, cfg.zebraDevice, cfg.bridgeStateFile, cfg.disableBot, serialErr); err != nil {
-		workerLog("main").Printf("%s run error: %v", runName, err)
+	if err := runHeadless(ctx, updates, zebraUpdates, cfg.zebraDevice, cfg.bridgeStateFile, cfg.disableBot, serialErr); err != nil {
+		workerLog("main").Printf("headless run error: %v", err)
 		cancel()
 		if botProc != nil {
 			if stopErr := botProc.Stop(3 * time.Second); stopErr != nil {
