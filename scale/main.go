@@ -88,8 +88,14 @@ func main() {
 		}
 	}
 
-	if err := runTUI(ctx, updates, zebraUpdates, sourceLine, cfg.zebraDevice, cfg.bridgeStateFile, cfg.disableBot, serialErr); err != nil {
-		workerLog("main").Printf("tui run error: %v", err)
+	runFn := runTUI
+	runName := "tui"
+	if cfg.disableTUI {
+		runFn = runHeadless
+		runName = "headless"
+	}
+	if err := runFn(ctx, updates, zebraUpdates, sourceLine, cfg.zebraDevice, cfg.bridgeStateFile, cfg.disableBot, serialErr); err != nil {
+		workerLog("main").Printf("%s run error: %v", runName, err)
 		cancel()
 		if botProc != nil {
 			if stopErr := botProc.Stop(3 * time.Second); stopErr != nil {

@@ -24,6 +24,7 @@ type appConfig struct {
 	disableZebra    bool
 	botDir          string
 	disableBot      bool
+	disableTUI      bool
 	bridgeStateFile string
 }
 
@@ -45,6 +46,7 @@ func parseFlags() (appConfig, error) {
 	flag.BoolVar(&cfg.disableZebra, "no-zebra", false, "disable zebra monitor/actions in TUI")
 	flag.StringVar(&cfg.botDir, "bot-dir", "../bot", "telegram bot module directory")
 	flag.BoolVar(&cfg.disableBot, "no-bot", false, "disable auto-start telegram bot")
+	flag.BoolVar(&cfg.disableTUI, "no-tui", false, "disable the Bubble Tea UI and run headless")
 	flag.StringVar(&cfg.bridgeStateFile, "bridge-state-file", defaultSharedBridgeStateFile, "shared bridge JSON file for scale+zebra+bot")
 	flag.Parse()
 

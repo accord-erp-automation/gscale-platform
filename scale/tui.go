@@ -44,6 +44,13 @@ type tuiModel struct {
 }
 
 func runTUI(ctx context.Context, updates <-chan Reading, zebraUpdates <-chan ZebraStatus, sourceLine string, zebraPreferred string, bridgeStateFile string, autoWhenNoBatch bool, serialErr error) error {
+	m := newRuntimeModel(ctx, updates, zebraUpdates, sourceLine, zebraPreferred, bridgeStateFile, autoWhenNoBatch, serialErr)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	_, err := p.Run()
+	return err
+}
+
+func newRuntimeModel(ctx context.Context, updates <-chan Reading, zebraUpdates <-chan ZebraStatus, sourceLine string, zebraPreferred string, bridgeStateFile string, autoWhenNoBatch bool, serialErr error) tuiModel {
 	m := tuiModel{
 		ctx:            ctx,
 		updates:        updates,
@@ -75,10 +82,7 @@ func runTUI(ctx context.Context, updates <-chan Reading, zebraUpdates <-chan Zeb
 	if zebraUpdates == nil {
 		m.zebra.Error = "disabled"
 	}
-
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err := p.Run()
-	return err
+	return m
 }
 
 func (m tuiModel) Init() tea.Cmd {
