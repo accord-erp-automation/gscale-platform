@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,11 +34,22 @@ func startBotProcess(botDir string) (*BotProcess, error) {
 
 	cmd := exec.Command("go", "run", "./cmd/bot")
 	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	logWriter := io.Writer(io.Discard)
+	var logCloser io.Closer
+	if scaleWorkflowLogs != nil {
+		if f, err := os.OpenFile(filepath.Join(scaleWorkflowLogs.Dir(), "bot-child.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			logWriter = f
+			logCloser = f
+		}
+	}
+	cmd.Stdout = logWriter
+	cmd.Stderr = logWriter
 
 	if err := cmd.Start(); err != nil {
+		if logCloser != nil {
+			_ = logCloser.Close()
+		}
 		lg.Printf("bot start error: %v", err)
 		return nil, fmt.Errorf("bot start xato: %w", err)
 	}
@@ -46,6 +58,9 @@ func startBotProcess(botDir string) (*BotProcess, error) {
 	bp := &BotProcess{cmd: cmd, done: make(chan error, 1)}
 	go func() {
 		bp.done <- cmd.Wait()
+		if logCloser != nil {
+			_ = logCloser.Close()
+		}
 	}()
 
 	select {

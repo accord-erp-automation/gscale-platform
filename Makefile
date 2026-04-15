@@ -28,7 +28,7 @@ MOBILE_FLUTTER_RUN_ARGS ?= --dart-define=API_BASE_URL=$(MOBILE_API_BASE_URL)
 
 help:
 	@echo "Targets:"
-	@echo "  make run        - scale worker ni ishga tushiradi (bot auto-start bilan)"
+	@echo "  make run        - scale worker + mobileapi sidecar (bot auto-start bilan)"
 	@echo "  make run-scale  - faqat scale worker (bot auto-startsiz)"
 	@echo "  make run-bot    - faqat telegram bot"
 	@echo "  make run-polygon - real qurilmasiz polygon simulator"
@@ -91,6 +91,62 @@ build-mobileapi:
 	go build -o ./bin/mobileapi ./cmd/mobileapi
 
 run: check-env fresh-bridge-state stop-dev-services stop-bot-services
+	@mkdir -p /tmp/gscale-zebra
+	@MOBILEAPI_PID=""; \
+	addr_host() { printf '%s\n' "$$1" | sed -E 's#:[^:]+$$##'; }; \
+	addr_port() { printf '%s\n' "$$1" | awk -F: '{print $$NF}'; }; \
+	connect_host() { case "$$1" in ''|0.0.0.0) printf '127.0.0.1' ;; *) printf '%s' "$$1" ;; esac; }; \
+	port_is_busy() { lsof -nP -iTCP:"$$1" -sTCP:LISTEN >/dev/null 2>&1; }; \
+	first_csv_value() { \
+		printf '%s\n' "$$1" | awk -F, '{gsub(/[[:space:]]/, "", $$1); print $$1}'; \
+	}; \
+	pick_first_free_csv() { \
+		CSV="$$1"; \
+		OLD_IFS="$$IFS"; \
+		IFS=,; \
+		set -- $$CSV; \
+		IFS="$$OLD_IFS"; \
+		for PORT in "$$@"; do \
+			PORT=$$(printf '%s' "$$PORT" | tr -d '[:space:]'); \
+			if [ -z "$$PORT" ]; then \
+				continue; \
+			fi; \
+			if ! port_is_busy "$$PORT"; then \
+				printf '%s' "$$PORT"; \
+				return 0; \
+			fi; \
+		done; \
+		return 1; \
+	}; \
+	cleanup() { \
+		if [ -n "$$MOBILEAPI_PID" ]; then kill "$$MOBILEAPI_PID" 2>/dev/null || true; fi; \
+		rm -f /tmp/gscale-zebra/mobileapi.pid; \
+	}; \
+	trap 'cleanup' EXIT INT TERM; \
+	MOBILE_API_PRIMARY_PORT=$$(first_csv_value "$(MOBILE_API_CANDIDATE_PORTS)"); \
+	MOBILE_API_BIND_HOST="$(MOBILE_API_BIND_HOST)"; \
+	MOBILE_API_PORT=$$(pick_first_free_csv "$(MOBILE_API_CANDIDATE_PORTS)") || { echo "run: mobileapi candidate ports band"; exit 1; }; \
+	MOBILE_API_CONNECT_HOST=$$(connect_host "$$MOBILE_API_BIND_HOST"); \
+	MOBILE_API_ADDR_RESOLVED="$$MOBILE_API_BIND_HOST:$$MOBILE_API_PORT"; \
+	if [ "$$MOBILE_API_PORT" != "$$MOBILE_API_PRIMARY_PORT" ]; then \
+		printf '[run] mobileapi port busy, using %s\n' "$$MOBILE_API_ADDR_RESOLVED"; \
+	fi; \
+	rm -f /tmp/gscale-zebra/mobileapi.log /tmp/gscale-zebra/mobileapi.pid; \
+	env MOBILE_API_ADDR="$$MOBILE_API_ADDR_RESOLVED" MOBILE_API_CANDIDATE_PORTS="$(MOBILE_API_CANDIDATE_PORTS)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" MOBILE_API_SETUP_FILE="$(CURDIR)/config/core.env" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" go run ./cmd/mobileapi >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
+	MOBILEAPI_PID=$$!; \
+	echo "$$MOBILEAPI_PID" >/tmp/gscale-zebra/mobileapi.pid; \
+	for i in $$(seq 1 40); do \
+		if $(CURL) -fsS "http://$$MOBILE_API_CONNECT_HOST:$$MOBILE_API_PORT/healthz" >/dev/null 2>&1; then \
+			break; \
+		fi; \
+		sleep 1; \
+	done; \
+	if ! $(CURL) -fsS "http://$$MOBILE_API_CONNECT_HOST:$$MOBILE_API_PORT/healthz" >/dev/null 2>&1; then \
+		echo "run: mobileapi failed to start"; \
+		sed -n '1,160p' /tmp/gscale-zebra/mobileapi.log; \
+		exit 1; \
+	fi; \
+	printf '[run] mobileapi ready:       http://%s:%s\n' "$$MOBILE_API_CONNECT_HOST" "$$MOBILE_API_PORT"; \
 	cd scale && go run . --no-bridge --device "$(SCALE_DEVICE)" --zebra-device "$(ZEBRA_DEVICE)" --bridge-state-file "$(BRIDGE_STATE_FILE)"
 
 run-scale: fresh-bridge-state stop-dev-services stop-bot-services
@@ -163,13 +219,15 @@ run-dev: fresh-bridge-state
 		if [ -n "$$POLY_PID" ]; then kill "$$POLY_PID" 2>/dev/null || true; fi; \
 		pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true; \
 		pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true; \
-		rm -f "$$DEV_CORE_ENV_FILE" /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid; \
+		rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid; \
 	}; \
 	trap 'cleanup' EXIT INT TERM; \
-	if [ -f "$(CURDIR)/config/core.env" ]; then \
-		grep -v '^ERP_READ_URL=' "$(CURDIR)/config/core.env" > "$$DEV_CORE_ENV_FILE"; \
-	else \
-		: > "$$DEV_CORE_ENV_FILE"; \
+	if [ ! -f "$$DEV_CORE_ENV_FILE" ]; then \
+		if [ -f "$(CURDIR)/config/core.env" ]; then \
+			grep -v '^ERP_READ_URL=' "$(CURDIR)/config/core.env" > "$$DEV_CORE_ENV_FILE"; \
+		else \
+			: > "$$DEV_CORE_ENV_FILE"; \
+		fi; \
 	fi; \
 	POLYGON_BIND_HOST=$$(addr_host "$(POLYGON_HTTP_ADDR)"); \
 	POLYGON_BASE_PORT=$$(addr_port "$(POLYGON_HTTP_ADDR)"); \
@@ -238,7 +296,7 @@ stop-dev-services:
 	@if [ -f /tmp/gscale-zebra/polygon.pid ]; then kill $$(cat /tmp/gscale-zebra/polygon.pid) 2>/dev/null || true; fi
 	@pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true
 	@pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true
-	@rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid /tmp/gscale-zebra/mobileapi-dev.core.env
+	@rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid
 
 stop-bot-services:
 	@pkill -f '[g]o run ./cmd/bot' 2>/dev/null || true

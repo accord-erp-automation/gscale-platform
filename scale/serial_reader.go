@@ -13,6 +13,7 @@ func startSerialReader(ctx context.Context, device string, baud int, unit string
 	lg := workerLog("worker.serial")
 	lg.Printf("start: device=%s baud=%d unit=%s", strings.TrimSpace(device), baud, strings.TrimSpace(unit))
 	go func() {
+		waiting := false
 		for {
 			select {
 			case <-ctx.Done():
@@ -22,7 +23,10 @@ func startSerialReader(ctx context.Context, device string, baud int, unit string
 
 			port, err := serial.OpenPort(&serial.Config{Name: device, Baud: baud, ReadTimeout: 250 * time.Millisecond})
 			if err != nil {
-				lg.Printf("open error: %v", err)
+				if !waiting {
+					lg.Printf("wait: serial device=%s baud=%d", device, baud)
+					waiting = true
+				}
 				push(out, Reading{
 					Source:    "serial",
 					Port:      device,
@@ -37,6 +41,10 @@ func startSerialReader(ctx context.Context, device string, baud int, unit string
 				continue
 			}
 
+			if waiting {
+				lg.Printf("ready: serial device=%s baud=%d", device, baud)
+				waiting = false
+			}
 			lg.Printf("port opened: device=%s baud=%d", device, baud)
 			push(out, Reading{
 				Source:    "serial",

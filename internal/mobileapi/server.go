@@ -291,12 +291,14 @@ func (s *Server) handleSetupERP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "erp_validation_failed", "message": err.Error()})
 		return
 	}
-	resolvedRead, err := erpread.Resolve(r.Context(), nil, setup.ERPURL, setup.ERPReadURL)
-	if err != nil {
+	if resolvedRead, err := erpread.Resolve(r.Context(), nil, setup.ERPURL, setup.ERPReadURL); err == nil {
+		setup.ERPReadURL = resolvedRead.BaseURL
+	} else if strings.TrimSpace(setup.ERPReadURL) != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "erp_read_discovery_failed", "message": err.Error()})
 		return
+	} else {
+		setup.ERPReadURL = ""
 	}
-	setup.ERPReadURL = resolvedRead.BaseURL
 
 	if err := saveERPSetup(s.cfg.SetupFile, setup); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})

@@ -456,6 +456,54 @@ func TestSetupERPStoresValidatedConfig(t *testing.T) {
 	}
 }
 
+func TestSetupERPCanSucceedWithoutReadService(t *testing.T) {
+	t.Parallel()
+
+	setupPath := t.TempDir() + "/mobile_setup.json"
+	erpService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/method/frappe.auth.get_logged_user":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"message":"Administrator"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer erpService.Close()
+
+	server := New(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+		SetupFile:       setupPath,
+	})
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mobile/setup/erp", bytes.NewBufferString(`{"erp_url":"`+erpService.URL+`","erp_api_key":"key-123","erp_api_secret":"secret-123"}`))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_write_configured":true`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_read_configured":false`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+
+	saved, err := loadERPSetup(setupPath)
+	if err != nil {
+		t.Fatalf("loadERPSetup: %v", err)
+	}
+	if saved.ERPURL != erpService.URL {
+		t.Fatalf("saved ERPURL = %q", saved.ERPURL)
+	}
+	if saved.ERPReadURL != "" {
+		t.Fatalf("saved ERPReadURL = %q", saved.ERPReadURL)
+	}
+}
+
 func TestSetupERPRejectsInvalidConfig(t *testing.T) {
 	t.Parallel()
 

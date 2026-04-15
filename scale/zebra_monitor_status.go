@@ -18,10 +18,16 @@ func startZebraMonitor(ctx context.Context, preferredDevice string, interval tim
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+		waiting := false
 
 		st := collectZebraStatus(preferredDevice, 900*time.Millisecond)
 		publishZebraStatus(out, st)
-		lg.Printf("status: connected=%v device=%s verify=%s error=%s", st.Connected, st.DevicePath, st.Verify, st.Error)
+		if st.Connected {
+			lg.Printf("ready: zebra device=%s verify=%s", st.DevicePath, st.Verify)
+		} else {
+			lg.Printf("wait: zebra device=%s", preferredDevice)
+			waiting = true
+		}
 		for {
 			select {
 			case <-ctx.Done():
@@ -30,7 +36,14 @@ func startZebraMonitor(ctx context.Context, preferredDevice string, interval tim
 			case <-ticker.C:
 				st := collectZebraStatus(preferredDevice, 900*time.Millisecond)
 				publishZebraStatus(out, st)
-				lg.Printf("status: connected=%v device=%s verify=%s error=%s", st.Connected, st.DevicePath, st.Verify, st.Error)
+				switch {
+				case st.Connected && waiting:
+					lg.Printf("ready: zebra device=%s verify=%s", st.DevicePath, st.Verify)
+					waiting = false
+				case !st.Connected && !waiting:
+					lg.Printf("wait: zebra device=%s", preferredDevice)
+					waiting = true
+				}
 			}
 		}
 	}()

@@ -303,7 +303,7 @@ Asosiy flaglar:
 
 ## 9. Buyruqlar va boshqaruv
 ### 9.1 Make targetlar
-- `make run`: scale worker (bot auto-start bilan)
+- `make run`: scale worker + mobileapi sidecar (bot auto-start bilan)
 - `make run-scale`: faqat scale
 - `make run-bot`: faqat bot
 - `make test`: barcha modul testlari

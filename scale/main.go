@@ -85,7 +85,17 @@ func main() {
 		}
 	}
 
-	if err := runHeadless(ctx, updates, zebraUpdates, cfg.zebraDevice, cfg.bridgeStateFile, cfg.disableBot, serialErr); err != nil {
+	serialDevice := port
+	if strings.TrimSpace(serialDevice) == "" {
+		serialDevice = cfg.device
+	}
+	serialBaud := usedBaud
+	if serialBaud <= 0 && len(cfg.bauds) > 0 {
+		serialBaud = cfg.bauds[0]
+	}
+	status := newConsoleStatus(os.Stdout, waitSerialLine(serialDevice, serialBaud), waitZebraLine(cfg.zebraDevice))
+
+	if err := runHeadless(ctx, updates, zebraUpdates, serialDevice, serialBaud, cfg.zebraDevice, cfg.bridgeStateFile, cfg.disableBot, serialErr, status); err != nil {
 		workerLog("main").Printf("headless run error: %v", err)
 		cancel()
 		if botProc != nil {

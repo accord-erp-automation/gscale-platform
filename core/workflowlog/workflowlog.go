@@ -60,7 +60,7 @@ func (m *Manager) Dir() string {
 
 func (m *Manager) Logger(worker string) *log.Logger {
 	if m == nil {
-		return log.New(os.Stdout, "[workflow] ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
+		return log.New(io.Discard, "[workflow] ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
 	}
 
 	name := sanitizeWorkerName(worker)
@@ -75,12 +75,11 @@ func (m *Manager) Logger(worker string) *log.Logger {
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		// Do not crash main flow on logging setup issues.
-		return log.New(os.Stdout, "["+name+"] ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
+		return log.New(io.Discard, "["+name+"] ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
 	}
 
 	m.files[name] = f
-	w := io.MultiWriter(os.Stdout, f)
-	l := log.New(w, "["+name+"] ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
+	l := log.New(f, "["+name+"] ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
 	m.loggers[name] = l
 	return l
 }
