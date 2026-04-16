@@ -126,7 +126,8 @@ run-foreground: fresh-bridge-state stop-dev-services stop-bot-services
 		if [ -n "$$MOBILEAPI_PID" ]; then kill "$$MOBILEAPI_PID" 2>/dev/null || true; fi; \
 		rm -f /tmp/gscale-zebra/mobileapi.pid; \
 	}; \
-	trap 'cleanup' EXIT INT TERM; \
+	trap 'cleanup' EXIT; \
+	trap 'cleanup; exit 0' INT TERM; \
 	MOBILE_API_PRIMARY_PORT=$$(first_csv_value "$(MOBILE_API_CANDIDATE_PORTS)"); \
 	MOBILE_API_BIND_HOST="$(MOBILE_API_BIND_HOST)"; \
 	MOBILE_API_PORT=$$(pick_first_free_csv "$(MOBILE_API_CANDIDATE_PORTS)") || { echo "run: mobileapi candidate ports band"; exit 1; }; \
@@ -230,7 +231,8 @@ run-dev: fresh-bridge-state
 		pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true; \
 		rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid; \
 	}; \
-	trap 'cleanup' EXIT INT TERM; \
+	trap 'cleanup' EXIT; \
+	trap 'cleanup; exit 0' INT TERM; \
 	if [ ! -f "$$DEV_CORE_ENV_FILE" ]; then \
 		if [ -f "$(CURDIR)/config/core.env" ]; then \
 			grep -v '^ERP_READ_URL=' "$(CURDIR)/config/core.env" > "$$DEV_CORE_ENV_FILE"; \
@@ -297,7 +299,7 @@ run-dev: fresh-bridge-state
 	printf '[run-dev] mobileapi ready:       http://%s:%s\n' "$$MOBILE_API_CONNECT_HOST" "$$MOBILE_API_PORT"; \
 	printf '[run-dev] core ready:            scale running in background\n'; \
 	printf '[run-dev] logs stay on disk:     polygon.log, mobileapi.log, scale-dev.log\n'; \
-	while :; do sleep 1; done
+	while :; do sleep 0.2 & wait $$!; done
 
 stop-dev-services:
 	@if [ -f /tmp/gscale-zebra/scale.pid ]; then kill $$(cat /tmp/gscale-zebra/scale.pid) 2>/dev/null || true; fi
