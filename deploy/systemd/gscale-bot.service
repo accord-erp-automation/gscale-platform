@@ -10,6 +10,7 @@ User=__APP_USER__
 Group=__APP_GROUP__
 WorkingDirectory=__PREFIX__
 EnvironmentFile=-__PREFIX__/config/bot.env
+Environment=CORE_ENV_PATH=__PREFIX__/config/core.env
 ExecStart=__PREFIX__/bin/bot
 Restart=always
 RestartSec=1

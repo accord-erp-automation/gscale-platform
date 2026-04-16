@@ -5,6 +5,7 @@ PREFIX="/opt/gscale-zebra"
 APP_USER="${SUDO_USER:-}"
 APP_GROUP=""
 START_AFTER_INSTALL=0
+INSTALL_BOT=0
 
 usage() {
   cat <<'EOF'
@@ -19,6 +20,7 @@ Options:
   --prefix <path>  Install root (default: /opt/gscale-zebra)
   --user <name>    Service user (default: SUDO_USER/current user)
   --group <name>   Service group (default: primary group of user)
+  --with-bot       Also enable/start telegram bot service
   --start          Start services after install
   -h, --help       Show help
 EOF
@@ -37,6 +39,10 @@ while [[ $# -gt 0 ]]; do
     --group)
       APP_GROUP="${2:-}"
       shift 2
+      ;;
+    --with-bot)
+      INSTALL_BOT=1
+      shift
       ;;
     --start)
       START_AFTER_INSTALL=1
@@ -91,9 +97,13 @@ fi
 required=(
   "${BIN_DIR}/bot"
   "${BIN_DIR}/scale"
+  "${BIN_DIR}/mobileapi"
   "${CONFIG_DIR}/bot.env.example"
+  "${CONFIG_DIR}/core.env.example"
+  "${CONFIG_DIR}/mobileapi.env.example"
   "${CONFIG_DIR}/scale.env.example"
   "${UNIT_DIR}/gscale-bot.service"
+  "${UNIT_DIR}/gscale-mobileapi.service"
   "${UNIT_DIR}/gscale-scale.service"
 )
 
@@ -123,10 +133,12 @@ if ! getent group "${APP_GROUP}" >/dev/null 2>&1; then
 fi
 
 echo "==> Installing to ${PREFIX}"
-install -d -m 0755 "${PREFIX}" "${PREFIX}/bin" "${PREFIX}/config" "${PREFIX}/logs"
+install -d -m 0755 "${PREFIX}" "${PREFIX}/bin" "${PREFIX}/logs"
+install -d -m 0750 "${PREFIX}/config"
 
 install -m 0755 "${BIN_DIR}/bot" "${PREFIX}/bin/bot"
 install -m 0755 "${BIN_DIR}/scale" "${PREFIX}/bin/scale"
+install -m 0755 "${BIN_DIR}/mobileapi" "${PREFIX}/bin/mobileapi"
 if [[ -f "${BIN_DIR}/zebra" ]]; then
   install -m 0755 "${BIN_DIR}/zebra" "${PREFIX}/bin/zebra"
 fi
@@ -134,11 +146,14 @@ fi
 if [[ ! -f "${PREFIX}/config/bot.env" ]]; then
   install -m 0640 "${CONFIG_DIR}/bot.env.example" "${PREFIX}/config/bot.env"
 fi
+if [[ ! -f "${PREFIX}/config/core.env" ]]; then
+  install -m 0640 "${CONFIG_DIR}/core.env.example" "${PREFIX}/config/core.env"
+fi
 if [[ ! -f "${PREFIX}/config/scale.env" ]]; then
   install -m 0640 "${CONFIG_DIR}/scale.env.example" "${PREFIX}/config/scale.env"
 fi
 
-chown -R "${APP_USER}:${APP_GROUP}" "${PREFIX}/logs"
+chown -R "${APP_USER}:${APP_GROUP}" "${PREFIX}/logs" "${PREFIX}/config"
 
 escape_sed() {
   printf '%s' "$1" | sed 's/[\\/&]/\\&/g'
@@ -160,21 +175,33 @@ render_unit() {
 
 tmp_scale="$(mktemp)"
 tmp_bot="$(mktemp)"
-trap 'rm -f "${tmp_scale}" "${tmp_bot}"' EXIT
+tmp_mobileapi="$(mktemp)"
+trap 'rm -f "${tmp_scale}" "${tmp_bot}" "${tmp_mobileapi}"' EXIT
 
 render_unit "${UNIT_DIR}/gscale-scale.service" "${tmp_scale}"
 render_unit "${UNIT_DIR}/gscale-bot.service" "${tmp_bot}"
+render_unit "${UNIT_DIR}/gscale-mobileapi.service" "${tmp_mobileapi}"
 
 install -m 0644 "${tmp_scale}" /etc/systemd/system/gscale-scale.service
 install -m 0644 "${tmp_bot}" /etc/systemd/system/gscale-bot.service
+install -m 0644 "${tmp_mobileapi}" /etc/systemd/system/gscale-mobileapi.service
 
 echo "==> Reloading systemd"
 systemctl daemon-reload
-systemctl enable gscale-scale.service gscale-bot.service >/dev/null
+systemctl enable gscale-scale.service gscale-mobileapi.service >/dev/null
+if [[ "${INSTALL_BOT}" == "1" ]]; then
+  systemctl enable gscale-bot.service >/dev/null
+else
+  systemctl disable gscale-bot.service >/dev/null 2>&1 || true
+  systemctl stop gscale-bot.service >/dev/null 2>&1 || true
+fi
 
 if [[ "${START_AFTER_INSTALL}" == "1" ]]; then
   echo "==> Starting services"
-  systemctl restart gscale-scale.service gscale-bot.service
+  systemctl restart gscale-scale.service gscale-mobileapi.service
+  if [[ "${INSTALL_BOT}" == "1" ]]; then
+    systemctl restart gscale-bot.service
+  fi
 fi
 
 echo
@@ -182,9 +209,15 @@ echo "Installed."
 echo "Config files:"
 echo " - ${PREFIX}/config/scale.env"
 echo " - ${PREFIX}/config/bot.env"
+echo " - ${PREFIX}/config/core.env"
+echo " - ${PREFIX}/config/mobileapi.env (optional, only for overrides)"
 echo
 echo "Useful commands:"
 echo " - systemctl status gscale-scale.service"
-echo " - systemctl status gscale-bot.service"
+echo " - systemctl status gscale-mobileapi.service"
 echo " - journalctl -u gscale-scale.service -f"
-echo " - journalctl -u gscale-bot.service -f"
+echo " - journalctl -u gscale-mobileapi.service -f"
+if [[ "${INSTALL_BOT}" == "1" ]]; then
+  echo " - systemctl status gscale-bot.service"
+  echo " - journalctl -u gscale-bot.service -f"
+fi

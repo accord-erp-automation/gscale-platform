@@ -24,11 +24,12 @@ MOBILE_API_BASE_URL ?= http://127.0.0.1:$(MOBILE_API_PORT)
 MOBILE_RUN_TARGET ?= run-auto
 MOBILE_FLUTTER_RUN_ARGS ?= --dart-define=API_BASE_URL=$(MOBILE_API_BASE_URL)
 
-.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-scale run-bot run-polygon run-test run-dev run-mobile run-mobile-android run-mobile-linux run-mobile-web stop-dev-services stop-bot-services fresh-bridge-state run-mobileapi test test-polygon test-mobileapi clean release release-all autostart-install autostart-status autostart-restart autostart-stop
+.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-foreground run-scale run-bot run-polygon run-test run-dev run-mobile run-mobile-android run-mobile-linux run-mobile-web stop-dev-services stop-bot-services fresh-bridge-state run-mobileapi test test-polygon test-mobileapi clean release release-all autostart-install autostart-install-bot autostart-status autostart-restart autostart-stop
 
 help:
 	@echo "Targets:"
-	@echo "  make run        - scale worker + mobileapi sidecar (bot auto-start bilan)"
+	@echo "  make run        - persistent service rejimi: scale + mobileapi ni install/start qiladi"
+	@echo "  make run-foreground - foreground rejimi: scale + mobileapi sidecar"
 	@echo "  make run-scale  - faqat scale worker (bot auto-startsiz)"
 	@echo "  make run-bot    - faqat telegram bot"
 	@echo "  make run-polygon - real qurilmasiz polygon simulator"
@@ -47,7 +48,7 @@ help:
 	@echo "  make test       - barcha modullarda test"
 	@echo "  make test-polygon - polygon modul testlari"
 	@echo "  make test-mobileapi - mobile API testlari"
-	@echo "  make autostart-install - systemd service'larni o'rnatadi va start qiladi"
+	@echo "  make autostart-install - scale + bot + mobileapi systemd service'larini o'rnatadi va start qiladi"
 	@echo "  make autostart-status  - service holatini ko'rsatadi"
 	@echo "  make autostart-restart - service'larni restart qiladi"
 	@echo "  make autostart-stop    - service'larni to'xtatadi"
@@ -68,7 +69,7 @@ fresh-bridge-state:
 	@mkdir -p /tmp/gscale-zebra
 	@rm -f "$(BRIDGE_STATE_FILE)" "$(BRIDGE_STATE_FILE).lock"
 
-build: build-bot build-scale build-zebra
+build: build-bot build-scale build-zebra build-mobileapi
 
 build-bot:
 	@mkdir -p bin
@@ -90,7 +91,10 @@ build-mobileapi:
 	@mkdir -p bin
 	go build -o ./bin/mobileapi ./cmd/mobileapi
 
-run: check-env fresh-bridge-state stop-dev-services stop-bot-services
+run:
+	@$(MAKE) autostart-install
+
+run-foreground: fresh-bridge-state stop-dev-services stop-bot-services
 	@mkdir -p /tmp/gscale-zebra
 	@MOBILEAPI_PID=""; \
 	addr_host() { printf '%s\n' "$$1" | sed -E 's#:[^:]+$$##'; }; \
@@ -147,7 +151,7 @@ run: check-env fresh-bridge-state stop-dev-services stop-bot-services
 		exit 1; \
 	fi; \
 	printf '[run] mobileapi ready:       http://%s:%s\n' "$$MOBILE_API_CONNECT_HOST" "$$MOBILE_API_PORT"; \
-	cd scale && go run . --no-bridge --device "$(SCALE_DEVICE)" --zebra-device "$(ZEBRA_DEVICE)" --bridge-state-file "$(BRIDGE_STATE_FILE)"
+	cd scale && go run . --no-bot --no-bridge --device "$(SCALE_DEVICE)" --zebra-device "$(ZEBRA_DEVICE)" --bridge-state-file "$(BRIDGE_STATE_FILE)"
 
 run-scale: fresh-bridge-state stop-dev-services stop-bot-services
 	cd scale && go run . --no-bot --no-bridge --device "$(SCALE_DEVICE)" --zebra-device "$(ZEBRA_DEVICE)" --bridge-state-file "$(BRIDGE_STATE_FILE)"
@@ -335,17 +339,22 @@ clean:
 	@if [ -d ./bin ]; then find ./bin -type f -delete; find ./bin -type d -empty -delete; fi
 	@if [ -d ./dist ]; then find ./dist -type f -delete; find ./dist -type d -empty -delete; fi
 
-autostart-install: check-env build
+autostart-install: build
 	sudo ./deploy/install.sh --user "$(APP_USER)" --group "$(APP_GROUP)" --start
 
+autostart-install-bot: check-env build
+	sudo ./deploy/install.sh --user "$(APP_USER)" --group "$(APP_GROUP)" --with-bot --start
+
 autostart-status:
-	sudo systemctl --no-pager --full status gscale-scale.service gscale-bot.service
+	sudo systemctl --no-pager --full status gscale-scale.service gscale-bot.service gscale-mobileapi.service
 
 autostart-restart:
-	sudo systemctl restart gscale-scale.service gscale-bot.service
+	sudo systemctl restart gscale-scale.service gscale-mobileapi.service
+	@systemctl is-enabled gscale-bot.service >/dev/null 2>&1 && sudo systemctl restart gscale-bot.service || true
 
 autostart-stop:
-	sudo systemctl stop gscale-scale.service gscale-bot.service
+	sudo systemctl stop gscale-scale.service gscale-mobileapi.service
+	@systemctl is-enabled gscale-bot.service >/dev/null 2>&1 && sudo systemctl stop gscale-bot.service || true
 
 release:
 	./scripts/release.sh --arch amd64

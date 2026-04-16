@@ -256,8 +256,25 @@ go run ./cmd/bot
 
 ### 7.3 Systemd autostart (repo rejimi)
 ```bash
+make run
+# yoki
 make autostart-install
 make autostart-status
+```
+
+`make run` endi persistent service rejimi: `scale + mobileapi` ni systemd orqali
+install qiladi, start qiladi va reboot'dan keyin ham avtomatik ko'taradi.
+
+Bot kerak bo'lsa:
+
+```bash
+make autostart-install-bot
+```
+
+Foreground rejim kerak bo'lsa:
+
+```bash
+make run-foreground
 ```
 
 ### 7.4 Release paket
@@ -301,13 +318,29 @@ Asosiy flaglar:
 `deploy/config/bot.env.example`:
 - `TELEGRAM_BOT_TOKEN`
 
+`deploy/config/core.env.example`:
+- `ERP_URL`
+- `ERP_READ_URL`
+- `ERP_API_KEY`
+- `ERP_API_SECRET`
+- `BRIDGE_STATE_FILE`
+
+`deploy/config/mobileapi.env.example`:
+- `MOBILE_API_ADDR`
+- `MOBILE_API_CANDIDATE_PORTS`
+- `MOBILE_API_SERVER_NAME`
+
+Bu fayl ixtiyoriy. `mobileapi` default qiymatlar bilan ham ishga tushadi.
+
 ## 9. Buyruqlar va boshqaruv
 ### 9.1 Make targetlar
-- `make run`: scale worker + mobileapi sidecar (bot auto-start bilan)
+- `make run`: persistent systemd stack (scale + mobileapi)
+- `make run-foreground`: scale worker + mobileapi sidecar (foreground, botsiz)
 - `make run-scale`: faqat scale
 - `make run-bot`: faqat bot
 - `make test`: barcha modul testlari
-- `make autostart-install|status|restart|stop`
+- `make autostart-install|status|restart|stop` - scale + mobileapi systemd stack
+- `make autostart-install-bot` - botni ham systemd stackka qo'shadi
 
 ### 9.2 Bot komandalar
 - `/start`: ERP ulanish tekshiruvi

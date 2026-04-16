@@ -103,13 +103,17 @@ for arch in "${ARCHES[@]}"; do
   echo "==> Building ${pkg_name}"
   build_binary "${arch}" "${pkg_dir}/bin/bot" "./bot/cmd/bot"
   build_binary "${arch}" "${pkg_dir}/bin/scale" "./scale"
+  build_binary "${arch}" "${pkg_dir}/bin/mobileapi" "./cmd/mobileapi"
   build_binary "${arch}" "${pkg_dir}/bin/zebra" "./zebra"
 
   install -m 0755 "${ROOT_DIR}/deploy/install.sh" "${pkg_dir}/install.sh"
   install -m 0644 "${ROOT_DIR}/deploy/README.md" "${pkg_dir}/README.md"
   install -m 0644 "${ROOT_DIR}/deploy/config/bot.env.example" "${pkg_dir}/config/bot.env.example"
+  install -m 0644 "${ROOT_DIR}/deploy/config/core.env.example" "${pkg_dir}/config/core.env.example"
+  install -m 0644 "${ROOT_DIR}/deploy/config/mobileapi.env.example" "${pkg_dir}/config/mobileapi.env.example"
   install -m 0644 "${ROOT_DIR}/deploy/config/scale.env.example" "${pkg_dir}/config/scale.env.example"
   install -m 0644 "${ROOT_DIR}/deploy/systemd/gscale-bot.service" "${pkg_dir}/systemd/gscale-bot.service"
+  install -m 0644 "${ROOT_DIR}/deploy/systemd/gscale-mobileapi.service" "${pkg_dir}/systemd/gscale-mobileapi.service"
   install -m 0644 "${ROOT_DIR}/deploy/systemd/gscale-scale.service" "${pkg_dir}/systemd/gscale-scale.service"
   printf '%s\n' "${VERSION}" > "${pkg_dir}/VERSION"
 
