@@ -342,6 +342,10 @@ Bu fayl ixtiyoriy. `mobileapi` default qiymatlar bilan ham ishga tushadi.
 - `make autostart-install|status|restart|stop` - scale + mobileapi systemd stack
 - `make autostart-install-bot` - botni ham systemd stackka qo'shadi
 
+`make run-dev` ishlatayotganda shu laptopda `gscale-scale.service` yoki
+`gscale-mobileapi.service` parallel ishlamasligi kerak; aks holda mobile app
+noto'g'ri serverga ulanib qolishi mumkin.
+
 ### 9.2 Bot komandalar
 - `/start`: ERP ulanish tekshiruvi
 - `/batch`: batch tanlash va ishga tushirish oqimi

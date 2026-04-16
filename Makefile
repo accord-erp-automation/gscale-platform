@@ -173,6 +173,11 @@ run-test: fresh-bridge-state stop-dev-services stop-bot-services
 run-dev: fresh-bridge-state
 	@$(MAKE) stop-dev-services >/dev/null 2>&1 || true
 	@$(MAKE) stop-bot-services >/dev/null 2>&1 || true
+	@if systemctl is-active --quiet gscale-mobileapi.service || systemctl is-active --quiet gscale-scale.service; then \
+		echo "run-dev: laptopdagi systemd gscale service'lari hali ishlayapti"; \
+		echo "run-dev: avval 'make autostart-stop' yoki 'sudo systemctl stop gscale-scale.service gscale-mobileapi.service' qiling"; \
+		exit 1; \
+	fi
 	@go build -o "$(POLYGON_DEV_BIN)" ./polygon
 	@go build -o "$(MOBILEAPI_DEV_BIN)" ./cmd/mobileapi
 	@POLY_PID=""; \
