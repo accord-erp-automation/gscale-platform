@@ -3,34 +3,36 @@ package mobileapi
 import (
 	"os"
 	"strings"
-
-	"core/runtimecfg"
 )
 
 const (
 	defaultDiscoveryAddr   = ":18081"
 	defaultBridgeStateFile = "/tmp/gscale-zebra/bridge_state.json"
+	defaultArchiveFile     = "/tmp/gscale-zebra/archive.fb"
 	defaultProfileFile     = "/tmp/gscale-zebra/mobile_profile.json"
 	defaultSetupFile       = "config/core.env"
 	defaultPolygonURL      = "http://127.0.0.1:18000"
 )
 
 type Config struct {
-	ListenAddr      string
-	DiscoveryAddr   string
-	BridgeStateFile string
-	ProfileFile     string
-	SetupFile       string
-	CandidatePorts  []int
-	PolygonURL      string
-	ERPURL          string
-	ERPReadURL      string
-	ERPAPIKey       string
-	ERPAPISecret    string
-	ServerName      string
-	LoginPhone      string
-	LoginCode       string
-	Profile         SessionProfile
+	ListenAddr       string
+	DiscoveryAddr    string
+	BridgeStateFile  string
+	ArchiveFile      string
+	ProfileFile      string
+	SetupFile        string
+	CandidatePorts   []int
+	PolygonURL       string
+	ERPURL           string
+	ERPReadURL       string
+	ERPAPIKey        string
+	ERPAPISecret     string
+	WarehouseMode    string
+	DefaultWarehouse string
+	ServerName       string
+	LoginPhone       string
+	LoginCode        string
+	Profile          SessionProfile
 }
 
 func LoadConfig() Config {
@@ -55,7 +57,7 @@ func LoadConfig() Config {
 		os.Getenv("MOBILE_API_SETUP_FILE"),
 		defaultSetupFile,
 	)
-	coreCfg, _ := runtimecfg.Load(setupFile)
+	coreCfg, _ := loadERPSetup(setupFile)
 	candidatePorts := parseMobileAPICandidatePorts(os.Getenv("MOBILE_API_CANDIDATE_PORTS"))
 	listenAddr := selectMobileAPIListenAddr(
 		os.Getenv("MOBILE_API_ADDR"),
@@ -64,20 +66,23 @@ func LoadConfig() Config {
 	)
 
 	return Config{
-		ListenAddr:      listenAddr,
-		DiscoveryAddr:   firstNonEmpty(os.Getenv("MOBILE_API_DISCOVERY_ADDR"), defaultDiscoveryAddr),
-		BridgeStateFile: firstNonEmpty(os.Getenv("BRIDGE_STATE_FILE"), defaultBridgeStateFile),
-		ProfileFile:     firstNonEmpty(os.Getenv("MOBILE_API_PROFILE_FILE"), defaultProfileFile),
-		SetupFile:       setupFile,
-		CandidatePorts:  candidatePorts,
-		PolygonURL:      firstNonEmpty(os.Getenv("POLYGON_URL"), defaultPolygonURL),
-		ERPURL:          firstNonEmpty(os.Getenv("ERP_URL"), coreCfg.ERPURL),
-		ERPReadURL:      firstNonEmpty(os.Getenv("ERP_READ_URL"), coreCfg.ERPReadURL),
-		ERPAPIKey:       firstNonEmpty(os.Getenv("ERP_API_KEY"), coreCfg.ERPAPIKey),
-		ERPAPISecret:    firstNonEmpty(os.Getenv("ERP_API_SECRET"), coreCfg.ERPAPISecret),
-		ServerName:      firstNonEmpty(os.Getenv("MOBILE_API_SERVER_NAME"), hostname, "gscale-zebra"),
-		LoginPhone:      phone,
-		LoginCode:       firstNonEmpty(os.Getenv("MOBILE_API_CODE"), "1234"),
+		ListenAddr:       listenAddr,
+		DiscoveryAddr:    firstNonEmpty(os.Getenv("MOBILE_API_DISCOVERY_ADDR"), defaultDiscoveryAddr),
+		BridgeStateFile:  firstNonEmpty(os.Getenv("BRIDGE_STATE_FILE"), defaultBridgeStateFile),
+		ArchiveFile:      firstNonEmpty(os.Getenv("MOBILE_API_ARCHIVE_FILE"), defaultArchiveFile),
+		ProfileFile:      firstNonEmpty(os.Getenv("MOBILE_API_PROFILE_FILE"), defaultProfileFile),
+		SetupFile:        setupFile,
+		CandidatePorts:   candidatePorts,
+		PolygonURL:       firstNonEmpty(os.Getenv("POLYGON_URL"), defaultPolygonURL),
+		ERPURL:           firstNonEmpty(os.Getenv("ERP_URL"), coreCfg.ERPURL),
+		ERPReadURL:       firstNonEmpty(os.Getenv("ERP_READ_URL"), coreCfg.ERPReadURL),
+		ERPAPIKey:        firstNonEmpty(os.Getenv("ERP_API_KEY"), coreCfg.ERPAPIKey),
+		ERPAPISecret:     firstNonEmpty(os.Getenv("ERP_API_SECRET"), coreCfg.ERPAPISecret),
+		WarehouseMode:    normalizeWarehouseMode(firstNonEmpty(os.Getenv("WAREHOUSE_MODE"), coreCfg.WarehouseMode)),
+		DefaultWarehouse: firstNonEmpty(os.Getenv("DEFAULT_WAREHOUSE"), coreCfg.DefaultWarehouse),
+		ServerName:       firstNonEmpty(os.Getenv("MOBILE_API_SERVER_NAME"), hostname, "gscale-zebra"),
+		LoginPhone:       phone,
+		LoginCode:        firstNonEmpty(os.Getenv("MOBILE_API_CODE"), "1234"),
 		Profile: SessionProfile{
 			Role:        role,
 			DisplayName: displayName,
@@ -93,6 +98,11 @@ func (c Config) HasERPWriteConfig() bool {
 	return strings.TrimSpace(c.ERPURL) != "" &&
 		strings.TrimSpace(c.ERPAPIKey) != "" &&
 		strings.TrimSpace(c.ERPAPISecret) != ""
+}
+
+func (c Config) HasDefaultWarehouse() bool {
+	return strings.EqualFold(strings.TrimSpace(c.WarehouseMode), "default") &&
+		strings.TrimSpace(c.DefaultWarehouse) != ""
 }
 
 func firstNonEmpty(values ...string) string {

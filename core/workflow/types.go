@@ -63,6 +63,7 @@ type Progress struct {
 	Selection   Selection
 	DraftCount  int
 	LastSuccess LastSuccess
+	TotalQty    float64
 	Note        string
 }
 

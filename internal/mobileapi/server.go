@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -41,6 +42,11 @@ type setupERPRequest struct {
 	ERPAPISecret string `json:"erp_api_secret"`
 }
 
+type setupWarehouseRequest struct {
+	WarehouseMode    string `json:"warehouse_mode"`
+	DefaultWarehouse string `json:"default_warehouse"`
+}
+
 type batchStartRequest struct {
 	ItemCode  string `json:"item_code"`
 	ItemName  string `json:"item_name"`
@@ -50,14 +56,16 @@ type batchStartRequest struct {
 type Server struct {
 	cfg              Config
 	store            *bridgestate.Store
+	archive          *ArchiveStore
 	http             *http.Client
 	control          *batchcontrol.Service
 	controlCtx       context.Context
 	controlCancel    context.CancelFunc
 	validateERPSetup func(context.Context, ERPSetup) error
 
-	mu     sync.Mutex
-	tokens map[string]SessionProfile
+	mu                    sync.Mutex
+	tokens                map[string]SessionProfile
+	archiveLastDraftCount int
 }
 
 func New(cfg Config) *Server {
@@ -69,6 +77,7 @@ func newServer(cfg Config, control *batchcontrol.Service) *Server {
 	server := &Server{
 		cfg:           cfg,
 		store:         bridgestate.New(cfg.BridgeStateFile),
+		archive:       NewArchiveStore(cfg.ArchiveFile),
 		http:          &http.Client{Timeout: 1500 * time.Millisecond},
 		controlCtx:    controlCtx,
 		controlCancel: controlCancel,
@@ -89,6 +98,9 @@ func (s *Server) Close() {
 	if s.control != nil {
 		s.control.StopAll()
 	}
+	if s.archive != nil {
+		_ = s.archive.CloseSession(time.Now().UTC())
+	}
 	if s.controlCancel != nil {
 		s.controlCancel()
 	}
@@ -103,13 +115,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/mobile/profile", s.handleProfile)
 	mux.HandleFunc("/v1/mobile/setup/status", s.handleSetupStatus)
 	mux.HandleFunc("/v1/mobile/setup/erp", s.handleSetupERP)
+	mux.HandleFunc("/v1/mobile/setup/warehouse", s.handleSetupWarehouse)
 	mux.HandleFunc("/v1/mobile/monitor/state", s.handleMonitorState)
 	mux.HandleFunc("/v1/mobile/monitor/stream", s.handleMonitorStream)
 	mux.HandleFunc("/v1/mobile/items", s.handleItems)
 	mux.HandleFunc("/v1/mobile/items/", s.handleItemRoutes)
+	mux.HandleFunc("/v1/mobile/warehouses", s.handleWarehouses)
 	mux.HandleFunc("/v1/mobile/batch/state", s.handleBatchState)
 	mux.HandleFunc("/v1/mobile/batch/start", s.handleBatchStart)
 	mux.HandleFunc("/v1/mobile/batch/stop", s.handleBatchStop)
+	mux.HandleFunc("/v1/mobile/archive", s.handleArchive)
 	return mux
 }
 
@@ -272,11 +287,18 @@ func (s *Server) handleSetupERP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	current, err := loadERPSetup(s.cfg.SetupFile)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
 	setup := ERPSetup{
-		ERPURL:       strings.TrimSpace(req.ERPURL),
-		ERPReadURL:   strings.TrimSpace(req.ERPReadURL),
-		ERPAPIKey:    strings.TrimSpace(req.ERPAPIKey),
-		ERPAPISecret: strings.TrimSpace(req.ERPAPISecret),
+		ERPURL:           strings.TrimSpace(req.ERPURL),
+		ERPReadURL:       strings.TrimSpace(req.ERPReadURL),
+		ERPAPIKey:        strings.TrimSpace(req.ERPAPIKey),
+		ERPAPISecret:     strings.TrimSpace(req.ERPAPISecret),
+		WarehouseMode:    current.WarehouseMode,
+		DefaultWarehouse: current.DefaultWarehouse,
 	}
 	if setup.ERPURL == "" || setup.ERPAPIKey == "" || setup.ERPAPISecret == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "erp_url_api_key_api_secret_required"})
@@ -309,14 +331,64 @@ func (s *Server) handleSetupERP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.setupStatusPayload())
 }
 
+func (s *Server) handleSetupWarehouse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if s.control != nil && s.control.ActiveBatch().Active {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_active"})
+		return
+	}
+
+	var req setupWarehouseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+
+	current, err := loadERPSetup(s.cfg.SetupFile)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	mode := normalizeWarehouseMode(req.WarehouseMode)
+	defaultWarehouse := strings.TrimSpace(req.DefaultWarehouse)
+	if mode == "default" && defaultWarehouse == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":   "default_warehouse_required",
+			"message": "default warehouse required",
+		})
+		return
+	}
+
+	current.WarehouseMode = mode
+	if defaultWarehouse != "" {
+		current.DefaultWarehouse = defaultWarehouse
+	}
+
+	if err := saveERPSetup(s.cfg.SetupFile, current); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	s.applyWarehouseSetup(current)
+	writeJSON(w, http.StatusOK, s.setupStatusPayload())
+}
+
 func (s *Server) setupStatusPayload() map[string]any {
 	return map[string]any{
-		"ok":                   true,
-		"erp_write_configured": s.cfg.HasERPWriteConfig(),
-		"erp_read_configured":  strings.TrimSpace(s.cfg.ERPReadURL) != "",
-		"batch_actions_ready":  s.cfg.HasERPWriteConfig(),
-		"erp_url":              strings.TrimSpace(s.cfg.ERPURL),
-		"erp_read_url":         strings.TrimSpace(s.cfg.ERPReadURL),
+		"ok":                           true,
+		"erp_write_configured":         s.cfg.HasERPWriteConfig(),
+		"erp_read_configured":          strings.TrimSpace(s.cfg.ERPReadURL) != "",
+		"batch_actions_ready":          s.cfg.HasERPWriteConfig(),
+		"erp_url":                      strings.TrimSpace(s.cfg.ERPURL),
+		"erp_read_url":                 strings.TrimSpace(s.cfg.ERPReadURL),
+		"warehouse_mode":               normalizeWarehouseMode(s.cfg.WarehouseMode),
+		"default_warehouse":            strings.TrimSpace(s.cfg.DefaultWarehouse),
+		"warehouse_default_configured": strings.TrimSpace(s.cfg.DefaultWarehouse) != "",
+		"warehouse_default_active": strings.EqualFold(strings.TrimSpace(s.cfg.WarehouseMode), "default") &&
+			strings.TrimSpace(s.cfg.DefaultWarehouse) != "",
 	}
 }
 
@@ -490,6 +562,23 @@ func (s *Server) handleItemRoutes(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleWarehouses(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	erp := newERPClient(s.cfg)
+	warehouses, err := erp.SearchWarehouses(r.Context(), strings.TrimSpace(r.URL.Query().Get("query")), parseLimit(r, 50))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"warehouses": warehouses,
+	})
+}
+
 func (s *Server) handleBatchState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
@@ -521,7 +610,18 @@ func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
 		ItemName:  strings.TrimSpace(req.ItemName),
 		Warehouse: strings.TrimSpace(req.Warehouse),
 	}.Normalize()
-	if selection.ItemCode == "" || selection.Warehouse == "" {
+	if selection.ItemCode == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "item_code_and_warehouse_required"})
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(s.cfg.WarehouseMode), "default") {
+		if strings.TrimSpace(s.cfg.DefaultWarehouse) == "" {
+			writeJSON(w, http.StatusPreconditionFailed, map[string]any{"error": "default_warehouse_not_configured"})
+			return
+		}
+		selection.Warehouse = strings.TrimSpace(s.cfg.DefaultWarehouse)
+	}
+	if selection.Warehouse == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "item_code_and_warehouse_required"})
 		return
 	}
@@ -537,10 +637,27 @@ func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_active_elsewhere"})
 		return
 	}
-	if !s.control.Start(s.controlCtx, mobileBatchOwnerID, selection, workflow.Hooks{}) {
+	if s.archive != nil {
+		if _, err := s.archive.OpenSession(selection.ItemCode, selection.ItemName, selection.Warehouse, time.Now().UTC()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if !s.control.Start(
+		s.controlCtx,
+		mobileBatchOwnerID,
+		selection,
+		workflow.Hooks{Progress: s.persistBatchProgress},
+	) {
+		if s.archive != nil {
+			_ = s.archive.CloseSession(time.Now().UTC())
+		}
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_start_failed"})
 		return
 	}
+	s.mu.Lock()
+	s.archiveLastDraftCount = 0
+	s.mu.Unlock()
 	batch, err := s.readBatchSnapshot()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -561,15 +678,92 @@ func (s *Server) handleBatchStop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_not_active"})
 		return
 	}
+	if s.archive != nil {
+		if err := s.archive.CloseSession(time.Now().UTC()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	s.mu.Lock()
+	s.archiveLastDraftCount = 0
+	s.mu.Unlock()
 	batch, err := s.readBatchSnapshot()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":    true,
-		"batch": batch,
+		"ok":      true,
+		"batch":   batch,
+		"message": formatBatchStopMessage(batch),
 	})
+}
+
+func (s *Server) persistBatchProgress(progress workflow.Progress) {
+	if s == nil || s.store == nil {
+		return
+	}
+	progress.Selection = progress.Selection.Normalize()
+	_ = s.store.Update(func(snapshot *bridgestate.Snapshot) {
+		snapshot.Batch.Active = true
+		snapshot.Batch.ChatID = mobileBatchOwnerID
+		snapshot.Batch.ItemCode = progress.Selection.ItemCode
+		snapshot.Batch.ItemName = progress.Selection.ItemName
+		snapshot.Batch.Warehouse = progress.Selection.Warehouse
+		snapshot.Batch.TotalQty = progress.TotalQty
+	})
+
+	if s.archive == nil || progress.DraftCount <= 0 || strings.TrimSpace(progress.LastSuccess.DraftName) == "" {
+		return
+	}
+
+	s.mu.Lock()
+	if progress.DraftCount <= s.archiveLastDraftCount {
+		s.mu.Unlock()
+		return
+	}
+	s.archiveLastDraftCount = progress.DraftCount
+	s.mu.Unlock()
+
+	if err := s.archive.RecordPrint(
+		progress.LastSuccess.Qty,
+		progress.LastSuccess.Unit,
+		progress.LastSuccess.DraftName,
+		progress.LastSuccess.EPC,
+		time.Now().UTC(),
+	); err != nil {
+		log.Printf("archive print record error: %v", err)
+	}
+}
+
+func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	sessions, err := s.readArchiveSessions(parseLimit(r, 50))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"archive": sessions,
+	})
+}
+
+func (s *Server) readArchiveSessions(limit int) ([]ArchiveSession, error) {
+	if s == nil || s.archive == nil {
+		return []ArchiveSession{}, nil
+	}
+	sessions, err := s.archive.ListSessions(limit)
+	if err != nil {
+		return nil, err
+	}
+	if sessions == nil {
+		return []ArchiveSession{}, nil
+	}
+	return sessions, nil
 }
 
 func (s *Server) readBatchSnapshot() (bridgestate.BatchSnapshot, error) {
@@ -581,6 +775,17 @@ func (s *Server) readBatchSnapshot() (bridgestate.BatchSnapshot, error) {
 		return bridgestate.BatchSnapshot{}, err
 	}
 	return snap.Batch, nil
+}
+
+func formatBatchStopMessage(batch bridgestate.BatchSnapshot) string {
+	name := strings.TrimSpace(batch.ItemName)
+	if name == "" {
+		name = strings.TrimSpace(batch.ItemCode)
+	}
+	if name == "" {
+		return "Batch to'xtadi"
+	}
+	return fmt.Sprintf("%s avvalgi deb %.3f kg bo'ldi", name, batch.TotalQty)
 }
 
 func extractItemCodeFromWarehousesPath(path string) (string, bool) {

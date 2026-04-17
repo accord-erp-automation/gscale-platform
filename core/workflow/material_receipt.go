@@ -37,6 +37,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 
 	draftCount := 0
 	lastSuccess := LastSuccess{}
+	totalQty := 0.0
 
 	for {
 		reading, err := r.qtyReader.WaitStablePositiveReading(ctx, r.options.StableReadTimeout, r.options.StableReadPollInterval)
@@ -51,6 +52,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				Selection:   selection,
 				DraftCount:  draftCount,
 				LastSuccess: lastSuccess,
+				TotalQty:    totalQty,
 				Note:        "Scale xato: " + err.Error(),
 			})
 			continue
@@ -76,6 +78,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				Selection:   selection,
 				DraftCount:  draftCount,
 				LastSuccess: lastSuccess,
+				TotalQty:    totalQty,
 				Note:        fmt.Sprintf("QTY juda kichik: %.3f kg | min %.3f kg", reading.Qty, minBatchQtyKg),
 			})
 			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
@@ -104,6 +107,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				Selection:   selection,
 				DraftCount:  draftCount,
 				LastSuccess: lastSuccess,
+				TotalQty:    totalQty,
 				Note:        "ERP xato: " + err.Error(),
 			})
 			continue
@@ -115,6 +119,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 			Selection:   selection,
 			DraftCount:  draftCount,
 			LastSuccess: lastSuccess,
+			TotalQty:    totalQty,
 			Note:        "Batch davom etmoqda | Print navbatga qo'yildi",
 		})
 
@@ -134,6 +139,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				Selection:   selection,
 				DraftCount:  draftCount,
 				LastSuccess: lastSuccess,
+				TotalQty:    totalQty,
 				Note:        note,
 			})
 			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
@@ -163,6 +169,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				Selection:   selection,
 				DraftCount:  draftCount,
 				LastSuccess: lastSuccess,
+				TotalQty:    totalQty,
 				Note:        note,
 			})
 			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
@@ -179,6 +186,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				Selection:   selection,
 				DraftCount:  draftCount,
 				LastSuccess: lastSuccess,
+				TotalQty:    totalQty,
 				Note:        "Submit xato: " + err.Error(),
 			})
 			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
@@ -191,6 +199,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 			r.history.Add(epc)
 		}
 		draftCount++
+		totalQty += draft.Qty
 		lastSuccess = LastSuccess{
 			DraftName: strings.TrimSpace(draft.Name),
 			Qty:       draft.Qty,
@@ -198,6 +207,14 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 			EPC:       epc,
 			Verify:    "OK",
 		}
+
+		r.reportProgress(hooks, Progress{
+			Selection:   selection,
+			DraftCount:  draftCount,
+			LastSuccess: lastSuccess,
+			TotalQty:    totalQty,
+			Note:        fmt.Sprintf("Batch davom etmoqda | Jami %.3f kg", totalQty),
+		})
 
 		for {
 			err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, draft.Qty)
@@ -211,6 +228,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				Selection:   selection,
 				DraftCount:  draftCount,
 				LastSuccess: lastSuccess,
+				TotalQty:    totalQty,
 				Note:        "Keyingi mahsulotni qo'ying (yoki 0 kg)",
 			})
 		}
