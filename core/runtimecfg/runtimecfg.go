@@ -10,21 +10,25 @@ import (
 const DefaultBridgeStateFile = "/tmp/gscale-zebra/bridge_state.json"
 
 type Config struct {
-	ERPURL          string
-	ERPReadURL      string
-	ERPAPIKey       string
-	ERPAPISecret    string
-	BridgeStateFile string
+	ERPURL           string
+	ERPReadURL       string
+	ERPAPIKey        string
+	ERPAPISecret     string
+	BridgeStateFile  string
+	WarehouseMode    string
+	DefaultWarehouse string
 }
 
 func Load(path string) (Config, error) {
 	path = strings.TrimSpace(path)
 	cfg := Config{
-		ERPURL:          strings.TrimSpace(os.Getenv("ERP_URL")),
-		ERPReadURL:      strings.TrimSpace(os.Getenv("ERP_READ_URL")),
-		ERPAPIKey:       strings.TrimSpace(os.Getenv("ERP_API_KEY")),
-		ERPAPISecret:    strings.TrimSpace(os.Getenv("ERP_API_SECRET")),
-		BridgeStateFile: strings.TrimSpace(os.Getenv("BRIDGE_STATE_FILE")),
+		ERPURL:           strings.TrimSpace(os.Getenv("ERP_URL")),
+		ERPReadURL:       strings.TrimSpace(os.Getenv("ERP_READ_URL")),
+		ERPAPIKey:        strings.TrimSpace(os.Getenv("ERP_API_KEY")),
+		ERPAPISecret:     strings.TrimSpace(os.Getenv("ERP_API_SECRET")),
+		BridgeStateFile:  strings.TrimSpace(os.Getenv("BRIDGE_STATE_FILE")),
+		WarehouseMode:    strings.TrimSpace(os.Getenv("WAREHOUSE_MODE")),
+		DefaultWarehouse: strings.TrimSpace(os.Getenv("DEFAULT_WAREHOUSE")),
 	}
 	if path != "" {
 		fileVals, err := parseEnvFile(path)
@@ -32,11 +36,13 @@ func Load(path string) (Config, error) {
 			return Config{}, err
 		}
 		cfg = Config{
-			ERPURL:          firstNonEmpty(cfg.ERPURL, fileVals["ERP_URL"], fileVals["URL"]),
-			ERPReadURL:      firstNonEmpty(cfg.ERPReadURL, fileVals["ERP_READ_URL"]),
-			ERPAPIKey:       firstNonEmpty(cfg.ERPAPIKey, fileVals["ERP_API_KEY"], fileVals["API_KEY"]),
-			ERPAPISecret:    firstNonEmpty(cfg.ERPAPISecret, fileVals["ERP_API_SECRET"], fileVals["API_SECRET"]),
-			BridgeStateFile: firstNonEmpty(cfg.BridgeStateFile, fileVals["BRIDGE_STATE_FILE"], DefaultBridgeStateFile),
+			ERPURL:           firstNonEmpty(cfg.ERPURL, fileVals["ERP_URL"], fileVals["URL"]),
+			ERPReadURL:       firstNonEmpty(cfg.ERPReadURL, fileVals["ERP_READ_URL"]),
+			ERPAPIKey:        firstNonEmpty(cfg.ERPAPIKey, fileVals["ERP_API_KEY"], fileVals["API_KEY"]),
+			ERPAPISecret:     firstNonEmpty(cfg.ERPAPISecret, fileVals["ERP_API_SECRET"], fileVals["API_SECRET"]),
+			BridgeStateFile:  firstNonEmpty(cfg.BridgeStateFile, fileVals["BRIDGE_STATE_FILE"], DefaultBridgeStateFile),
+			WarehouseMode:    firstNonEmpty(cfg.WarehouseMode, fileVals["WAREHOUSE_MODE"]),
+			DefaultWarehouse: firstNonEmpty(cfg.DefaultWarehouse, fileVals["DEFAULT_WAREHOUSE"]),
 		}
 	}
 	if cfg.BridgeStateFile == "" {
@@ -59,6 +65,8 @@ func Save(path string, cfg Config) error {
 		"ERP_API_KEY=" + strings.TrimSpace(cfg.ERPAPIKey),
 		"ERP_API_SECRET=" + strings.TrimSpace(cfg.ERPAPISecret),
 		"BRIDGE_STATE_FILE=" + firstNonEmpty(strings.TrimSpace(cfg.BridgeStateFile), DefaultBridgeStateFile),
+		"WAREHOUSE_MODE=" + strings.TrimSpace(cfg.WarehouseMode),
+		"DEFAULT_WAREHOUSE=" + strings.TrimSpace(cfg.DefaultWarehouse),
 	}
 	body := strings.Join(lines, "\n") + "\n"
 	tmp := path + ".tmp"

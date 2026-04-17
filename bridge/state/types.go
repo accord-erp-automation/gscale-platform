@@ -34,12 +34,13 @@ type ZebraSnapshot struct {
 }
 
 type BatchSnapshot struct {
-	Active    bool   `json:"active"`
-	ChatID    int64  `json:"chat_id,omitempty"`
-	ItemCode  string `json:"item_code,omitempty"`
-	ItemName  string `json:"item_name,omitempty"`
-	Warehouse string `json:"warehouse,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	Active    bool    `json:"active"`
+	ChatID    int64   `json:"chat_id,omitempty"`
+	ItemCode  string  `json:"item_code,omitempty"`
+	ItemName  string  `json:"item_name,omitempty"`
+	Warehouse string  `json:"warehouse,omitempty"`
+	TotalQty  float64 `json:"total_qty,omitempty"`
+	UpdatedAt string  `json:"updated_at,omitempty"`
 }
 
 type PrintRequestSnapshot struct {

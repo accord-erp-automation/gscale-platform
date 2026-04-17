@@ -275,6 +275,46 @@ func TestWarehousesEndpointReturnsCatalogResults(t *testing.T) {
 	}
 }
 
+func TestWarehouseListEndpointReturnsWarehouseChoices(t *testing.T) {
+	t.Parallel()
+
+	erpService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/resource/Warehouse" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.URL.Query().Get("fields"); got == "" {
+			t.Fatalf("fields query missing")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"name":"Stores - A","company":"Main Co"}]}`))
+	}))
+	defer erpService.Close()
+
+	server := New(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+		ERPURL:          erpService.URL,
+		ERPAPIKey:       "key-123",
+		ERPAPISecret:    "secret-123",
+	})
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/mobile/warehouses?query=stores", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("warehouse list status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"warehouse":"Stores - A"`)) {
+		t.Fatalf("warehouse list body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"company":"Main Co"`)) {
+		t.Fatalf("warehouse list body = %s", rec.Body.String())
+	}
+}
+
 func TestBatchStartStopEndpoints(t *testing.T) {
 	t.Parallel()
 
@@ -343,16 +383,155 @@ func TestBatchStartStopEndpoints(t *testing.T) {
 	}
 }
 
+func TestBatchStopReturnsSummaryMessage(t *testing.T) {
+	t.Parallel()
+
+	stateFile := t.TempDir() + "/bridge_state.json"
+	store := bridgestate.New(stateFile)
+	runner := &blockingRunner{
+		started: make(chan struct{}, 1),
+		stopped: make(chan struct{}, 1),
+		progresses: []workflow.Progress{
+			{
+				Selection: workflow.Selection{
+					ItemCode:  "ITEM-001",
+					ItemName:  "Green Tea",
+					Warehouse: "Stores - A",
+				},
+				TotalQty: 7.25,
+			},
+		},
+	}
+	server := newServer(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: stateFile,
+		ERPURL:          "http://localhost:8000",
+		ERPAPIKey:       "key-123",
+		ERPAPISecret:    "secret-123",
+	}, batchcontrol.New(batchcontrol.Dependencies{
+		Catalog:    stubCatalog{},
+		BatchState: bridgeBatchStateWriter{store: store},
+		Runner:     runner,
+	}))
+	defer server.Close()
+
+	startReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea","warehouse":"Stores - A"}`))
+	startRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(startRec, startReq)
+	if startRec.Code != http.StatusOK {
+		t.Fatalf("start status = %d body=%s", startRec.Code, startRec.Body.String())
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not start")
+	}
+
+	stopReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/stop", nil)
+	stopRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(stopRec, stopReq)
+	if stopRec.Code != http.StatusOK {
+		t.Fatalf("stop status = %d body=%s", stopRec.Code, stopRec.Body.String())
+	}
+	if !bytes.Contains(stopRec.Body.Bytes(), []byte(`"Green Tea avvalgi deb 7.250 kg bo'ldi"`)) {
+		t.Fatalf("stop body = %s", stopRec.Body.String())
+	}
+}
+
+func TestArchiveEndpointReturnsBatchHistory(t *testing.T) {
+	t.Parallel()
+
+	stateFile := t.TempDir() + "/bridge_state.json"
+	archiveFile := t.TempDir() + "/archive.fb"
+	store := bridgestate.New(stateFile)
+	runner := &blockingRunner{
+		started: make(chan struct{}, 1),
+		stopped: make(chan struct{}, 1),
+		progresses: []workflow.Progress{
+			{
+				Selection: workflow.Selection{
+					ItemCode:  "ITEM-001",
+					ItemName:  "Green Tea",
+					Warehouse: "Stores - A",
+				},
+				DraftCount: 1,
+				LastSuccess: workflow.LastSuccess{
+					DraftName: "MAT-STE-0001",
+					Qty:       7.25,
+					Unit:      "kg",
+					EPC:       "EPC-1",
+				},
+				TotalQty: 7.25,
+			},
+		},
+	}
+	server := newServer(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: stateFile,
+		ArchiveFile:     archiveFile,
+		ERPURL:          "http://localhost:8000",
+		ERPAPIKey:       "key-123",
+		ERPAPISecret:    "secret-123",
+	}, batchcontrol.New(batchcontrol.Dependencies{
+		Catalog:    stubCatalog{},
+		BatchState: bridgeBatchStateWriter{store: store},
+		Runner:     runner,
+	}))
+	defer server.Close()
+
+	startReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea","warehouse":"Stores - A"}`))
+	startRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(startRec, startReq)
+	if startRec.Code != http.StatusOK {
+		t.Fatalf("start status = %d body=%s", startRec.Code, startRec.Body.String())
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not start")
+	}
+
+	stopReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/stop", nil)
+	stopRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(stopRec, stopReq)
+	if stopRec.Code != http.StatusOK {
+		t.Fatalf("stop status = %d body=%s", stopRec.Code, stopRec.Body.String())
+	}
+	select {
+	case <-runner.stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not stop")
+	}
+
+	archiveReq := httptest.NewRequest(http.MethodGet, "/v1/mobile/archive", nil)
+	archiveRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(archiveRec, archiveReq)
+	if archiveRec.Code != http.StatusOK {
+		t.Fatalf("archive status = %d body=%s", archiveRec.Code, archiveRec.Body.String())
+	}
+	if !bytes.Contains(archiveRec.Body.Bytes(), []byte(`"item_name":"Green Tea"`)) {
+		t.Fatalf("archive body = %s", archiveRec.Body.String())
+	}
+	if !bytes.Contains(archiveRec.Body.Bytes(), []byte(`"total_qty":7.25`)) {
+		t.Fatalf("archive body = %s", archiveRec.Body.String())
+	}
+	if !bytes.Contains(archiveRec.Body.Bytes(), []byte(`"print_count":1`)) {
+		t.Fatalf("archive body = %s", archiveRec.Body.String())
+	}
+}
+
 func TestSetupStatusEndpoint(t *testing.T) {
 	t.Parallel()
 
 	server := New(Config{
-		ServerName:      "gscale-dev",
-		BridgeStateFile: t.TempDir() + "/bridge_state.json",
-		ERPReadURL:      "http://127.0.0.1:8090",
-		ERPURL:          "http://localhost:8000",
-		ERPAPIKey:       "key-123",
-		ERPAPISecret:    "secret-123",
+		ServerName:       "gscale-dev",
+		BridgeStateFile:  t.TempDir() + "/bridge_state.json",
+		ERPReadURL:       "http://127.0.0.1:8090",
+		ERPURL:           "http://localhost:8000",
+		ERPAPIKey:        "key-123",
+		ERPAPISecret:     "secret-123",
+		WarehouseMode:    "default",
+		DefaultWarehouse: "Stores - A",
 	})
 	defer server.Close()
 
@@ -374,6 +553,107 @@ func TestSetupStatusEndpoint(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_read_url":"http://127.0.0.1:8090"`)) {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"warehouse_mode":"default"`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"default_warehouse":"Stores - A"`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"warehouse_default_active":true`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestSetupWarehouseEndpointStoresDefaultWarehouse(t *testing.T) {
+	t.Parallel()
+
+	setupPath := t.TempDir() + "/mobile_setup.json"
+	server := New(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+		SetupFile:       setupPath,
+		ERPURL:          "http://localhost:8000",
+		ERPAPIKey:       "key-123",
+		ERPAPISecret:    "secret-123",
+	})
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mobile/setup/warehouse", bytes.NewBufferString(`{"warehouse_mode":"default","default_warehouse":"Stores - A"}`))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"warehouse_mode":"default"`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"default_warehouse":"Stores - A"`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	saved, err := loadERPSetup(setupPath)
+	if err != nil {
+		t.Fatalf("loadERPSetup: %v", err)
+	}
+	if saved.WarehouseMode != "default" {
+		t.Fatalf("saved WarehouseMode = %q", saved.WarehouseMode)
+	}
+	if saved.DefaultWarehouse != "Stores - A" {
+		t.Fatalf("saved DefaultWarehouse = %q", saved.DefaultWarehouse)
+	}
+	if server.cfg.WarehouseMode != "default" {
+		t.Fatalf("server cfg WarehouseMode = %q", server.cfg.WarehouseMode)
+	}
+	if server.cfg.DefaultWarehouse != "Stores - A" {
+		t.Fatalf("server cfg DefaultWarehouse = %q", server.cfg.DefaultWarehouse)
+	}
+}
+
+func TestBatchStartUsesDefaultWarehouseWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	stateFile := t.TempDir() + "/bridge_state.json"
+	store := bridgestate.New(stateFile)
+	writer := bridgeBatchStateWriter{store: store}
+	runner := &blockingRunner{
+		started: make(chan struct{}, 1),
+		stopped: make(chan struct{}, 1),
+	}
+	server := newServer(Config{
+		ServerName:       "gscale-dev",
+		BridgeStateFile:  stateFile,
+		ERPURL:           "http://localhost:8000",
+		ERPAPIKey:        "key-123",
+		ERPAPISecret:     "secret-123",
+		WarehouseMode:    "default",
+		DefaultWarehouse: "Stores - A",
+	}, batchcontrol.New(batchcontrol.Dependencies{
+		Catalog:    stubCatalog{},
+		BatchState: writer,
+		Runner:     runner,
+	}))
+	defer server.Close()
+
+	startReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea"}`))
+	startRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(startRec, startReq)
+
+	if startRec.Code != http.StatusOK {
+		t.Fatalf("start status = %d body=%s", startRec.Code, startRec.Body.String())
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not start")
+	}
+
+	snap, err := store.Read()
+	if err != nil {
+		t.Fatalf("read bridge after start: %v", err)
+	}
+	if snap.Batch.Warehouse != "Stores - A" {
+		t.Fatalf("batch warehouse = %q", snap.Batch.Warehouse)
 	}
 }
 
@@ -605,13 +885,20 @@ func (s stubCatalog) SearchItemWarehouses(context.Context, string, string, int) 
 }
 
 type blockingRunner struct {
-	started chan struct{}
-	stopped chan struct{}
+	started    chan struct{}
+	stopped    chan struct{}
+	progresses []workflow.Progress
 }
 
 func (r *blockingRunner) Run(ctx context.Context, selection workflow.Selection, hooks workflow.Hooks) error {
 	if r.started != nil {
 		r.started <- struct{}{}
+	}
+	for _, progress := range r.progresses {
+		progress.Selection = selection.Normalize()
+		if hooks.Progress != nil {
+			hooks.Progress(progress)
+		}
 	}
 	<-ctx.Done()
 	if r.stopped != nil {

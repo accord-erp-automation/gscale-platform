@@ -60,6 +60,14 @@ func (s *Server) applyERPSetup(setup ERPSetup) {
 	}
 }
 
+func (s *Server) applyWarehouseSetup(setup ERPSetup) {
+	if s == nil {
+		return
+	}
+	s.cfg.WarehouseMode = normalizeWarehouseMode(setup.WarehouseMode)
+	s.cfg.DefaultWarehouse = strings.TrimSpace(setup.DefaultWarehouse)
+}
+
 func (s *Server) newControlService() *batchcontrol.Service {
 	bridgeStore := bridgestate.New(s.cfg.BridgeStateFile)
 	erp := newERPClient(s.cfg)
@@ -100,10 +108,8 @@ func (w bridgeBatchStateWriter) Set(active bool, ownerID int64, selection workfl
 			snapshot.Batch.ItemCode = selection.ItemCode
 			snapshot.Batch.ItemName = selection.ItemName
 			snapshot.Batch.Warehouse = selection.Warehouse
+			snapshot.Batch.TotalQty = 0
 		} else {
-			snapshot.Batch.ItemCode = ""
-			snapshot.Batch.ItemName = ""
-			snapshot.Batch.Warehouse = ""
 			snapshot.PrintRequest = bridgestate.PrintRequestSnapshot{}
 		}
 		snapshot.Batch.UpdatedAt = at
@@ -415,6 +421,13 @@ type erpWarehouseDetailResponse struct {
 	} `json:"data"`
 }
 
+type erpWarehouseListResponse struct {
+	Data []struct {
+		Name    string `json:"name"`
+		Company string `json:"company"`
+	} `json:"data"`
+}
+
 type erpCreateStockEntryResponse struct {
 	Data struct {
 		Name string `json:"name"`
@@ -648,6 +661,59 @@ func (c *erpClient) SearchItemWarehouses(ctx context.Context, itemCode, query st
 		return nil, fmt.Errorf("erp bin json parse xato: %w", err)
 	}
 	return normalizeERPWarehouseStocks(payload), nil
+}
+
+func (c *erpClient) SearchWarehouses(ctx context.Context, query string, limit int) ([]warehouseChoice, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	c.resolveReadURL(ctx)
+	if c.readURL != "" {
+		// The read service currently exposes warehouse detail lookups only, so
+		// the mobile picker falls back to ERP resource queries below.
+	}
+
+	q := url.Values{}
+	q.Set("fields", `[`+"\"name\",\"company\""+`]`)
+	q.Set("limit_page_length", strconv.Itoa(limit))
+	q.Set("order_by", "name asc")
+	query = strings.TrimSpace(query)
+	if query != "" {
+		pattern := "%" + query + "%"
+		orFilters := [][]interface{}{
+			{"Warehouse", "name", "like", pattern},
+			{"Warehouse", "company", "like", pattern},
+		}
+		ob, _ := json.Marshal(orFilters)
+		q.Set("or_filters", string(ob))
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/resource/Warehouse?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setAuthHeader(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("erp warehouse list http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload erpWarehouseListResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("erp warehouse list json parse xato: %w", err)
+	}
+	return normalizeERPWarehouseChoices(payload), nil
 }
 
 func (c *erpClient) CreateMaterialReceiptDraft(ctx context.Context, in workflow.CreateMaterialReceiptDraftInput) (workflow.Draft, error) {
@@ -955,6 +1021,26 @@ func normalizeERPWarehouseStocks(payload erpListBinsResponse) []batchcontrol.War
 		})
 	}
 	return stocks
+}
+
+func normalizeERPWarehouseChoices(payload erpWarehouseListResponse) []warehouseChoice {
+	choices := make([]warehouseChoice, 0, len(payload.Data))
+	for _, r := range payload.Data {
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			continue
+		}
+		choices = append(choices, warehouseChoice{
+			Warehouse: name,
+			Company:   strings.TrimSpace(r.Company),
+		})
+	}
+	return choices
+}
+
+type warehouseChoice struct {
+	Warehouse string `json:"warehouse"`
+	Company   string `json:"company"`
 }
 
 func IsDuplicateBarcodeError(err error) bool {

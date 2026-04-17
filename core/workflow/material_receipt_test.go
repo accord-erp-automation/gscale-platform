@@ -149,8 +149,17 @@ func TestMaterialReceiptRunnerRunSuccess(t *testing.T) {
 	if !slices.Equal(history.items, []string{"EPC-2"}) {
 		t.Fatalf("history = %#v", history.items)
 	}
-	if len(progresses) != 1 || progresses[0].Note != "Batch davom etmoqda | Print navbatga qo'yildi" {
+	if len(progresses) != 2 {
 		t.Fatalf("progresses = %#v", progresses)
+	}
+	if progresses[0].TotalQty != 0 {
+		t.Fatalf("first progress total = %.3f", progresses[0].TotalQty)
+	}
+	if progresses[1].TotalQty != 5.25 {
+		t.Fatalf("final progress total = %.3f", progresses[1].TotalQty)
+	}
+	if !strings.Contains(progresses[1].Note, "Jami 5.250 kg") {
+		t.Fatalf("final progress note = %q", progresses[1].Note)
 	}
 }
 
