@@ -6,6 +6,7 @@ BRIDGE_STATE_FILE ?= /tmp/gscale-zebra/bridge_state.json
 POLYGON_HTTP_ADDR ?= 127.0.0.1:18000
 POLYGON_SCENARIO ?= batch-flow
 POLYGON_SEED ?= 42
+POLYGON_AUTO ?= true
 RUN_DEV_PORT_SCAN ?= 40
 APP_USER ?= $(shell id -un)
 APP_GROUP ?= $(shell id -gn)
@@ -13,6 +14,7 @@ MOBILE_API_CANDIDATE_PORTS ?= 39117,41257,43391,45533,47681
 MOBILE_API_BIND_HOST ?= 0.0.0.0
 MOBILE_API_SERVER_NAME ?= $(shell hostname)
 RUN_DEV_CORE_ENV ?= /tmp/gscale-zebra/mobileapi-dev.core.env
+RUN_DEV_PID_FILE ?= /tmp/gscale-zebra/run-dev.pid
 CURL ?= curl
 POLYGON_DEV_BIN ?= /tmp/gscale-zebra/polygon-dev
 MOBILEAPI_DEV_BIN ?= /tmp/gscale-zebra/mobileapi-dev
@@ -24,7 +26,7 @@ MOBILE_API_BASE_URL ?= http://127.0.0.1:$(MOBILE_API_PORT)
 MOBILE_RUN_TARGET ?= run-auto
 MOBILE_FLUTTER_RUN_ARGS ?= --dart-define=API_BASE_URL=$(MOBILE_API_BASE_URL)
 
-.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-foreground run-scale run-bot run-polygon run-test run-dev run-mobile run-mobile-android run-mobile-linux run-mobile-web stop-dev-services stop-bot-services fresh-bridge-state run-mobileapi test test-polygon test-mobileapi clean release release-all autostart-install autostart-install-bot autostart-status autostart-restart autostart-stop
+.PHONY: help check-env build build-bot build-scale build-zebra build-polygon build-mobileapi run run-foreground run-scale run-bot run-polygon run-test run-dev run-mobile run-mobile-android run-mobile-linux run-mobile-web stop-dev-services hard-clean-dev-services stop-bot-services fresh-bridge-state run-mobileapi test test-polygon test-mobileapi clean release release-all autostart-install autostart-install-bot autostart-status autostart-restart autostart-stop
 
 help:
 	@echo "Targets:"
@@ -34,7 +36,7 @@ help:
 	@echo "  make run-bot    - faqat telegram bot"
 	@echo "  make run-polygon - real qurilmasiz polygon simulator"
 	@echo "  make run-test   - polygon + scale worker (qurilmasiz core test)"
-	@echo "  make run-dev    - backend/core dev stack: polygon + mobileapi + scale (no erp-read)"
+	@echo "  make run-dev    - fresh backend/core dev stack: stops local gscale systemd services, then polygon + mobileapi + scale (no erp-read)"
 	@echo "  make run-mobile - Flutter mobile client (default: auto device)"
 	@echo "  make run-mobile-android - Flutter mobile client Android uchun"
 	@echo "  make run-mobile-linux   - Flutter mobile client Linux desktop uchun"
@@ -59,6 +61,7 @@ help:
 	@echo "Override:"
 	@echo "  make run SCALE_DEVICE=/dev/ttyUSB1 ZEBRA_DEVICE=/dev/usb/lp0"
 	@echo "  make run-polygon SCENARIO=stress"
+	@echo "  make run-dev POLYGON_AUTO=false # fake scale auto cycles o'chirish"
 	@echo "  make run-mobile MOBILE_API_BASE_URL=http://127.0.0.1:39117"
 	@echo "  make run-mobile-android MOBILE_APP_DIR=/path/to/mobile_app"
 
@@ -172,19 +175,16 @@ run-test: fresh-bridge-state stop-dev-services stop-bot-services
 	cd scale && go run . --no-bot --no-zebra --bridge-url "http://$(POLYGON_HTTP_ADDR)/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)"
 
 run-dev: fresh-bridge-state
-	@$(MAKE) stop-dev-services >/dev/null 2>&1 || true
+	@$(MAKE) hard-clean-dev-services >/dev/null 2>&1 || true
 	@$(MAKE) stop-bot-services >/dev/null 2>&1 || true
-	@if systemctl is-active --quiet gscale-mobileapi.service || systemctl is-active --quiet gscale-scale.service; then \
-		echo "run-dev: laptopdagi systemd gscale service'lari hali ishlayapti"; \
-		echo "run-dev: avval 'make autostart-stop' yoki 'sudo systemctl stop gscale-scale.service gscale-mobileapi.service' qiling"; \
-		exit 1; \
-	fi
+	@$(MAKE) stop-gscale-systemd-services >/dev/null
 	@go build -o "$(POLYGON_DEV_BIN)" ./polygon
 	@go build -o "$(MOBILEAPI_DEV_BIN)" ./cmd/mobileapi
 	@POLY_PID=""; \
 	MOBILEAPI_PID=""; \
 	SCALE_PID=""; \
 	DEV_CORE_ENV_FILE="$(RUN_DEV_CORE_ENV)"; \
+	RUN_DEV_PID_FILE="$(RUN_DEV_PID_FILE)"; \
 	addr_host() { printf '%s\n' "$$1" | sed -E 's#:[^:]+$$##'; }; \
 	addr_port() { printf '%s\n' "$$1" | awk -F: '{print $$NF}'; }; \
 	connect_host() { case "$$1" in ''|0.0.0.0) printf '127.0.0.1' ;; *) printf '%s' "$$1" ;; esac; }; \
@@ -229,16 +229,15 @@ run-dev: fresh-bridge-state
 		if [ -n "$$POLY_PID" ]; then kill "$$POLY_PID" 2>/dev/null || true; fi; \
 		pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true; \
 		pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true; \
-		rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid; \
+		rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid "$$RUN_DEV_PID_FILE"; \
 	}; \
 	trap 'cleanup' EXIT; \
 	trap 'cleanup; exit 0' INT TERM; \
-	if [ ! -f "$$DEV_CORE_ENV_FILE" ]; then \
-		if [ -f "$(CURDIR)/config/core.env" ]; then \
-			grep -v '^ERP_READ_URL=' "$(CURDIR)/config/core.env" > "$$DEV_CORE_ENV_FILE"; \
-		else \
-			: > "$$DEV_CORE_ENV_FILE"; \
-		fi; \
+	echo $$$$ > "$$RUN_DEV_PID_FILE"; \
+	if [ -f "$(CURDIR)/config/core.env" ]; then \
+		cp "$(CURDIR)/config/core.env" "$$DEV_CORE_ENV_FILE"; \
+	else \
+		: > "$$DEV_CORE_ENV_FILE"; \
 	fi; \
 	POLYGON_BIND_HOST=$$(addr_host "$(POLYGON_HTTP_ADDR)"); \
 	POLYGON_BASE_PORT=$$(addr_port "$(POLYGON_HTTP_ADDR)"); \
@@ -256,7 +255,7 @@ run-dev: fresh-bridge-state
 	if [ "$$MOBILE_API_PORT" != "$$MOBILE_API_PRIMARY_PORT" ]; then \
 		printf '[run-dev] mobileapi port busy, using %s\n' "$$MOBILE_API_ADDR_RESOLVED"; \
 	fi; \
-	"$(POLYGON_DEV_BIN)" --http-addr "$$POLYGON_ADDR" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" >/tmp/gscale-zebra/polygon.log 2>&1 & \
+	"$(POLYGON_DEV_BIN)" --http-addr "$$POLYGON_ADDR" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" --auto="$(POLYGON_AUTO)" >/tmp/gscale-zebra/polygon.log 2>&1 & \
 	POLY_PID=$$!; \
 	echo "$$POLY_PID" >/tmp/gscale-zebra/polygon.pid; \
 	for i in $$(seq 1 40); do \
@@ -302,17 +301,41 @@ run-dev: fresh-bridge-state
 	while :; do sleep 0.2 & wait $$!; done
 
 stop-dev-services:
+	@if [ -f "$(RUN_DEV_PID_FILE)" ]; then kill $$(cat "$(RUN_DEV_PID_FILE)") 2>/dev/null || true; fi
 	@if [ -f /tmp/gscale-zebra/scale.pid ]; then kill $$(cat /tmp/gscale-zebra/scale.pid) 2>/dev/null || true; fi
 	@if [ -f /tmp/gscale-zebra/mobileapi.pid ]; then kill $$(cat /tmp/gscale-zebra/mobileapi.pid) 2>/dev/null || true; fi
 	@if [ -f /tmp/gscale-zebra/polygon.pid ]; then kill $$(cat /tmp/gscale-zebra/polygon.pid) 2>/dev/null || true; fi
 	@pgrep -f '[/]tmp/gscale-zebra/mobileapi-dev' | xargs -r kill 2>/dev/null || true
 	@pgrep -f '[/]tmp/gscale-zebra/polygon-dev' | xargs -r kill 2>/dev/null || true
+	@rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid "$(RUN_DEV_PID_FILE)"
+
+hard-clean-dev-services: stop-dev-services
+	@pkill -f '[g]o run ./cmd/mobileapi' 2>/dev/null || true
+	@pkill -f '[g]o run ./polygon' 2>/dev/null || true
+	@pkill -f '/go-build/.*/[m]obileapi' 2>/dev/null || true
+	@pkill -f '/go-build/.*/[p]olygon' 2>/dev/null || true
+	@pkill -f '/go-build/.*/[s]cale --no-bot --no-zebra' 2>/dev/null || true
 	@rm -f /tmp/gscale-zebra/mobileapi.pid /tmp/gscale-zebra/polygon.pid /tmp/gscale-zebra/scale.pid
 
 stop-bot-services:
 	@pkill -f '[g]o run ./cmd/bot' 2>/dev/null || true
 	@pkill -f '/go-build/.*/[b]ot' 2>/dev/null || true
 	@pkill -x bot 2>/dev/null || true
+
+stop-gscale-systemd-services:
+	@set -e; \
+	if command -v systemctl >/dev/null 2>&1; then \
+		UNITS=""; \
+		for unit in gscale-scale.service gscale-mobileapi.service gscale-bot.service; do \
+			if systemctl is-active --quiet "$$unit"; then \
+				UNITS="$$UNITS $$unit"; \
+			fi; \
+		done; \
+		if [ -n "$$UNITS" ]; then \
+			echo "[run-dev] stopping systemd services:$${UNITS}"; \
+			sudo systemctl stop $$UNITS; \
+		fi; \
+	fi
 
 run-mobile:
 	@test -d "$(MOBILE_APP_DIR)" || (echo "xato: mobile app checkout topilmadi: $(MOBILE_APP_DIR)"; exit 1)

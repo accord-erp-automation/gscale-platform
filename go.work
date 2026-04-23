@@ -2,10 +2,8 @@ go 1.25
 
 use (
 	.
-	./bot
 	./bridge
 	./core
 	./polygon
 	./scale
-	./zebra
 )
