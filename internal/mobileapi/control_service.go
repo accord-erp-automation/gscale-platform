@@ -21,6 +21,7 @@ import (
 )
 
 const mobileBatchOwnerID int64 = 1
+const erpCatalogResponseLimit = 8 * 1024 * 1024
 
 func validateERPWriteSetup(ctx context.Context, setup ERPSetup) error {
 	client := &erpClient{
@@ -513,18 +514,18 @@ func (c *erpClient) CheckConnection(ctx context.Context) (string, error) {
 	return payload.Message, nil
 }
 
-func (c *erpClient) SearchItems(ctx context.Context, query string, limit int) ([]batchcontrol.Item, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 50 {
-		limit = 50
-	}
+func (c *erpClient) SearchItems(ctx context.Context, query string, limit int, warehouse string) ([]batchcontrol.Item, error) {
+	warehouse = strings.TrimSpace(warehouse)
 
 	c.resolveReadURL(ctx)
 	if c.readURL != "" {
 		q := url.Values{}
-		q.Set("limit", strconv.Itoa(limit))
+		if limit > 0 {
+			q.Set("limit", strconv.Itoa(limit))
+		}
+		if warehouse != "" {
+			q.Set("warehouse", warehouse)
+		}
 		if query = strings.TrimSpace(query); query != "" {
 			q.Set("query", query)
 		}
@@ -537,7 +538,7 @@ func (c *erpClient) SearchItems(ctx context.Context, query string, limit int) ([
 			return nil, err
 		}
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, erpCatalogResponseLimit))
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
 			return nil, fmt.Errorf("erp read items http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
@@ -550,6 +551,9 @@ func (c *erpClient) SearchItems(ctx context.Context, query string, limit int) ([
 
 	q := url.Values{}
 	q.Set("fields", `[`+"\"name\",\"item_code\",\"item_name\""+`]`)
+	if limit <= 0 {
+		limit = 10000
+	}
 	q.Set("limit_page_length", strconv.Itoa(limit))
 	q.Set("order_by", "modified desc")
 	if query = strings.TrimSpace(query); query != "" {

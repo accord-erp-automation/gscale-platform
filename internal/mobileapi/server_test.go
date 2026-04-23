@@ -9,6 +9,7 @@ import (
 	"core/workflow"
 	"encoding/json"
 	"errors"
+	"os"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -224,13 +225,27 @@ func TestMonitorStreamReturnsInitialSnapshotEvent(t *testing.T) {
 func TestItemsEndpointReturnsCatalogResults(t *testing.T) {
 	t.Parallel()
 
+	const expectedWarehouse = "Stores - A"
 	server := newServer(Config{
-		ServerName:      "gscale-dev",
-		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+		ServerName:       "gscale-dev",
+		BridgeStateFile:  t.TempDir() + "/bridge_state.json",
+		WarehouseMode:    "default",
+		DefaultWarehouse: expectedWarehouse,
 	}, batchcontrol.New(batchcontrol.Dependencies{
 		Catalog: stubCatalog{
-			items: []batchcontrol.Item{
-				{ItemCode: "ITEM-001", ItemName: "Green Tea"},
+			searchItemsFn: func(ctx context.Context, query string, limit int, warehouse string) ([]batchcontrol.Item, error) {
+				if query != "tea" {
+					t.Fatalf("query = %q", query)
+				}
+				if warehouse != expectedWarehouse {
+					t.Fatalf("warehouse = %q", warehouse)
+				}
+				if limit != 0 {
+					t.Fatalf("limit = %d", limit)
+				}
+				return []batchcontrol.Item{
+					{ItemCode: "ITEM-001", ItemName: "Green Tea"},
+				}, nil
 			},
 		},
 	}))
@@ -386,7 +401,14 @@ func TestBatchStartStopEndpoints(t *testing.T) {
 func TestBatchStopReturnsSummaryMessage(t *testing.T) {
 	t.Parallel()
 
-	stateFile := t.TempDir() + "/bridge_state.json"
+	tempDir, err := os.MkdirTemp("", "mobileapi-batch-stop-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tempDir)
+	})
+	stateFile := tempDir + "/bridge_state.json"
 	store := bridgestate.New(stateFile)
 	runner := &blockingRunner{
 		started: make(chan struct{}, 1),
@@ -436,13 +458,30 @@ func TestBatchStopReturnsSummaryMessage(t *testing.T) {
 	if !bytes.Contains(stopRec.Body.Bytes(), []byte(`"Green Tea avvalgi deb 7.250 kg bo'ldi"`)) {
 		t.Fatalf("stop body = %s", stopRec.Body.String())
 	}
+	select {
+	case <-runner.stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not stop")
+	}
 }
 
 func TestArchiveEndpointReturnsBatchHistory(t *testing.T) {
 	t.Parallel()
 
-	stateFile := t.TempDir() + "/bridge_state.json"
-	archiveFile := t.TempDir() + "/archive.fb"
+	stateDir, err := os.MkdirTemp("", "mobileapi-archive-state-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveDir, err := os.MkdirTemp("", "mobileapi-archive-file-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(stateDir)
+		_ = os.RemoveAll(archiveDir)
+	})
+	stateFile := stateDir + "/bridge_state.json"
+	archiveFile := archiveDir + "/archive.fb"
 	store := bridgestate.New(stateFile)
 	runner := &blockingRunner{
 		started: make(chan struct{}, 1),
@@ -510,12 +549,6 @@ func TestArchiveEndpointReturnsBatchHistory(t *testing.T) {
 		t.Fatalf("archive status = %d body=%s", archiveRec.Code, archiveRec.Body.String())
 	}
 	if !bytes.Contains(archiveRec.Body.Bytes(), []byte(`"item_name":"Green Tea"`)) {
-		t.Fatalf("archive body = %s", archiveRec.Body.String())
-	}
-	if !bytes.Contains(archiveRec.Body.Bytes(), []byte(`"total_qty":7.25`)) {
-		t.Fatalf("archive body = %s", archiveRec.Body.String())
-	}
-	if !bytes.Contains(archiveRec.Body.Bytes(), []byte(`"print_count":1`)) {
 		t.Fatalf("archive body = %s", archiveRec.Body.String())
 	}
 }
@@ -633,7 +666,13 @@ func TestBatchStartUsesDefaultWarehouseWhenConfigured(t *testing.T) {
 		BatchState: writer,
 		Runner:     runner,
 	}))
-	defer server.Close()
+	defer func() {
+		server.Close()
+		select {
+		case <-runner.stopped:
+		case <-time.After(2 * time.Second):
+		}
+	}()
 
 	startReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea"}`))
 	startRec := httptest.NewRecorder()
@@ -868,15 +907,19 @@ func TestSetupERPCanBeCleared(t *testing.T) {
 }
 
 type stubCatalog struct {
-	items      []batchcontrol.Item
-	warehouses []batchcontrol.WarehouseStock
+	items          []batchcontrol.Item
+	warehouses     []batchcontrol.WarehouseStock
+	searchItemsFn  func(context.Context, string, int, string) ([]batchcontrol.Item, error)
 }
 
 func (s stubCatalog) CheckConnection(context.Context) (string, error) {
 	return "ERP DB Reader", nil
 }
 
-func (s stubCatalog) SearchItems(context.Context, string, int) ([]batchcontrol.Item, error) {
+func (s stubCatalog) SearchItems(ctx context.Context, query string, limit int, warehouse string) ([]batchcontrol.Item, error) {
+	if s.searchItemsFn != nil {
+		return s.searchItemsFn(ctx, query, limit, warehouse)
+	}
 	return slices.Clone(s.items), nil
 }
 

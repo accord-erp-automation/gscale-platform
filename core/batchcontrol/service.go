@@ -20,7 +20,7 @@ type WarehouseStock struct {
 
 type Catalog interface {
 	CheckConnection(ctx context.Context) (string, error)
-	SearchItems(ctx context.Context, query string, limit int) ([]Item, error)
+	SearchItems(ctx context.Context, query string, limit int, warehouse string) ([]Item, error)
 	SearchItemWarehouses(ctx context.Context, itemCode, query string, limit int) ([]WarehouseStock, error)
 }
 
@@ -83,11 +83,11 @@ func (s *Service) CheckConnection(ctx context.Context) (string, error) {
 	return s.catalog.CheckConnection(ctx)
 }
 
-func (s *Service) SearchItems(ctx context.Context, query string, limit int) ([]Item, error) {
+func (s *Service) SearchItems(ctx context.Context, query string, limit int, warehouse string) ([]Item, error) {
 	if s == nil || s.catalog == nil {
 		return nil, nil
 	}
-	return s.catalog.SearchItems(ctx, query, limit)
+	return s.catalog.SearchItems(ctx, query, limit, warehouse)
 }
 
 func (s *Service) SearchItemWarehouses(ctx context.Context, itemCode, query string, limit int) ([]WarehouseStock, error) {

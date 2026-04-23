@@ -529,7 +529,11 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
-	items, err := s.control.SearchItems(r.Context(), strings.TrimSpace(r.URL.Query().Get("query")), parseLimit(r, 50))
+	warehouse := strings.TrimSpace(r.URL.Query().Get("warehouse"))
+	if warehouse == "" && strings.EqualFold(strings.TrimSpace(s.cfg.WarehouseMode), "default") {
+		warehouse = strings.TrimSpace(s.cfg.DefaultWarehouse)
+	}
+	items, err := s.control.SearchItems(r.Context(), strings.TrimSpace(r.URL.Query().Get("query")), 0, warehouse)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return
