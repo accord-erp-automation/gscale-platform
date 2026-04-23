@@ -1,420 +1,294 @@
-# GSCALE-ZEBRA
+# GScale Platform
 
-Scale + Zebra RFID + Telegram Bot + ERPNext integratsiyasi uchun amaliy ishlab chiqilgan ko'p-modulli (Go workspace) tizim.
-Ushbu lokal nusxa hozir `gscale-zebra` remote'iga ulangan holda tekshirilmoqda.
+## Abstract
+`gscale-platform` is the orchestration and runtime repository of a mobile-first warehouse workflow that connects four operational concerns into one transaction chain:
 
-## Annotatsiya
-Ushbu loyiha ishlab chiqarish yoki ombor sharoitida real tarozi o'qishini RFID markirovka va ERP hujjatlashtirish bilan bir zanjirga birlashtiradi. Tizimning asosiy g'oyasi: fizik o'lchovdan (qty) boshlab, ERPNext'da `Material Receipt` draft yaratish, so'ng aynan shu EPC bilan Zebra orqali chop etish va yakunda hujjatni submit qilishgacha bo'lgan oqimni holatga asoslangan ishonchli pipeline ko'rinishida ishlatish.
+1. weight acquisition from a scale,
+2. RFID and label execution for Zebra printers,
+3. ERPNext draft creation and submission,
+4. operator control through a mobile application.
 
-Loyiha institut amaliy ishi uchun mos ravishda quyidagilarni namoyish etadi:
-- real vaqtli signal oqimini qayta ishlash;
-- barqarorlikni aniqlash (stable-detection) asosida trigger mexanizmi;
-- ko'p jarayonli tizimda umumiy holatni atomar yangilash;
-- tashqi servislar (Telegram, ERP API, Zebra USB) bilan integratsiya;
-- Linux xizmat (systemd) sifatida ekspluatatsiya.
+This repository is one member of a three-repository system:
 
-## Mundarija
-- [1. Muammo va maqsad](#1-muammo-va-maqsad)
-- [2. Tizim arxitekturasi](#2-tizim-arxitekturasi)
-- [3. Modullar tavsifi](#3-modullar-tavsifi)
-- [4. Ma'lumotlar modeli (bridge state)](#4-malumotlar-modeli-bridge-state)
-- [5. Asosiy algoritmlar](#5-asosiy-algoritmlar)
-- [6. Ishlash oqimi](#6-ishlash-oqimi)
-- [7. O'rnatish va ishga tushirish](#7-ornatish-va-ishga-tushirish)
-- [8. Konfiguratsiya](#8-konfiguratsiya)
-- [9. Buyruqlar va boshqaruv](#9-buyruqlar-va-boshqaruv)
-- [10. Loglash, monitoring va xatoliklar](#10-loglash-monitoring-va-xatoliklar)
-- [11. Test va verifikatsiya](#11-test-va-verifikatsiya)
-- [12. Cheklovlar va rivojlantirish yo'nalishlari](#12-cheklovlar-va-rivojlantirish-yonalishlari)
+- `gscale-platform`: runtime orchestration, bridge-state coordination, mobile API, scale worker, simulator, and optional Telegram bot.
+- `gscale-erp-read`: read-only ERP catalog service for fast item and warehouse lookups.
+- `gscale-mobile-app`: Flutter client used by operators on the shop floor.
 
-## 1. Muammo va maqsad
-### Muammo
-Amaliy jarayonda quyidagi ajralgan bosqichlar mavjud bo'ladi:
-1. Tarozida mahsulot og'irligini o'qish.
-2. RFID tegga EPC yozish va uni tekshirish.
-3. ERP tizimida operatsion hujjat (draft) yaratish.
+In practical terms, this repository is the operational center of the system. It owns the state machine that turns a stable weight reading into a print request and an ERP transaction.
 
-Bu bosqichlar alohida-alohida bajarilganda inson xatosi, vaqt yo'qotilishi va tracing qiyinligi ortadi.
+## Repository Ecosystem
 
-### Maqsad
-Bitta integrallashgan tizim yaratish:
-- Scale o'qish barqaror bo'lganda yangi cycle'ni aniqlash;
-- Zebra natijasini status bilan kuzatish;
-- Batch holatiga qarab ERP draft yaratishni boshqarish;
-- Barcha komponentlar holatini bitta umumiy state faylga jamlash.
+| Repository | Primary role | Typical deployment location |
+| --- | --- | --- |
+| [`gscale-platform`](https://github.com/accord-erp-automation/gscale-platform) | Runtime coordination, bridge state, scale worker, mobile API, simulator | Edge device, operator workstation, or test laptop |
+| [`gscale-erp-read`](https://github.com/accord-erp-automation/gscale-erp-read) | Read-only ERP catalog service | ERP-side server or any machine with trusted ERP DB access |
+| [`gscale-mobile-app`](https://github.com/WIKKIwk/gscale-mobile-app) | Operator-facing mobile user interface | Android phone, tablet, or Flutter desktop/web dev environment |
 
-## 2. Tizim arxitekturasi
-Loyiha `go.work` asosida 5 asosiy moduldan tashkil topgan:
+Each repository is intentionally narrow in scope. Together they form one application boundary.
 
-- `scale`: real-time worker, scale va Zebra monitor orchestration.
-- `bot`: Telegram bot, ERP integratsiyasi, batch session boshqaruvi.
-- `bridge`: umumiy state (`JSON`) uchun atomar store.
-- `core`: barqaror qty asosida EPC trigger logikasi.
-- `zebra`: diagnostika va servis komandalar uchun CLI utilita.
+## System Context
 
-### Yuksak darajadagi oqim
+### Problem Statement
+Warehouse operations frequently split scale reading, label printing, and ERP entry into separate manual steps. That creates three predictable risks:
+
+- inconsistent quantities between physical and digital records,
+- barcode or EPC mismatches,
+- operator delay caused by repeated data entry.
+
+The platform addresses this by treating the workflow as a state-driven transaction pipeline rather than a collection of unrelated tools.
+
+### Architectural Position
+This repository sits between the mobile client and the physical devices:
+
 ```text
-[Scale serial/bridge] -> [scale worker] -> [bridge_state.json] <- [bot worker]
-                                 |                      |
-                                 v                      v
-                           [Zebra USB I/O]         [ERPNext API]
-                                 |
-                                 v
-                            [EPC / VERIFY]
+gscale-mobile-app
+        |
+        v
+   mobileapi
+        |
+        +---------------------> gscale-erp-read -----------------> ERP DB
+        |
+        v
+  bridge_state.json
+        ^
+        |
+      scale worker -----------------------> Zebra printer / RFID
+        |
+        +---------------------> real scale or polygon simulator
 ```
 
-### Dizayn qarorlari
-- Modullarni ajratish: testlash va ekspluatatsiyani soddalashtiradi.
-- Shared-state fayl yondashuvi: komponentlar orasida bo'sh bog'lanish (loose coupling).
-- File-lock + atomic rename: race condition va yarim yozilgan fayl xavfini pasaytiradi.
+The `mobileapi` process exposes operator workflows. The `scale` process monitors the physical or simulated scale and fulfills print requests. The `bridge` state file acts as the shared transactional coordination surface. The `gscale-erp-read` companion repository supplies item and warehouse read models without exposing write privileges.
 
-## 3. Modullar tavsifi
-### `scale` moduli
-Asosiy vazifalar:
-- serial portni auto-detect qilish (`/dev/serial/by-id/*`, `ttyUSB*`, `ttyACM*`);
-- scale frame parsing (`kg/g/lb/oz`, minus formatlar, stable/unstable markerlar);
-- serial ishlamasa HTTP bridge fallback o'qish;
-- Zebra holatini polling qilish;
-- headless worker rejimi orqali operator oqimini yuritish;
-- bridge state'ga `scale` va `zebra` snapshot yozish;
-- bridge state'dagi `print_request` buyruqlarini kuzatish va printerga ijro qilish.
+## Scope of This Repository
 
-### `bot` moduli
-Asosiy vazifalar:
-- Telegram komandalarni qabul qilish: `/start`, `/batch`, `/log`, `/epc`;
-- item/warehouse inline-qidiruv orqali ERP'dan tanlash;
-- batch session ochish/yopish (`Material Receipt` tugmasi orqali);
-- bridge state'dan stable qty ni kutish;
-- ERPNext'da `Stock Entry` (`Material Receipt`) draft yaratish;
-- `print_request` orqali worker'ga chop etish buyruq yuborish;
-- print natijasiga qarab draft'ni submit yoki delete qilish;
-- ish jarayonida ishlatilgan EPC'lar tarixini saqlash va `.txt` ko'rinishida yuborish (`/epc`).
+This repository owns the following responsibilities:
 
-### `bridge` moduli
-Asosiy vazifalar:
-- `bridge_state.json` ni yagona manba sifatida saqlash;
-- lock-fayl bilan eksklyuziv yozish;
-- `tmp` faylga yozib `rename` qilish orqali atomar update.
+- mobile-facing HTTP API for operator actions and status monitoring,
+- real-time scale worker runtime,
+- print-request lifecycle management,
+- bridge-state persistence and synchronization,
+- EPC generation and workflow state transitions,
+- development simulator for scale and fake printer behavior,
+- optional Telegram bot workflow for non-mobile operation.
 
-### `core` moduli
-Asosiy vazifalar:
-- umumiy EPC generatsiya logikasini saqlash;
-- har bir yangi sikl uchun unikal 24-hex EPC hosil qilish.
+This repository deliberately does **not** own:
 
-### `zebra` moduli
-Asosiy vazifalar:
-- printer topish, status va SGD sozlamalarini tekshirish;
-- RFID encode/read testlari;
-- kalibratsiya va self-check.
+- the mobile UI implementation itself,
+- the ERP-side read-only catalog service implementation,
+- ERP business configuration and master data governance.
 
-## 4. Ma'lumotlar modeli (bridge state)
-Default fayl:
-- `/tmp/gscale-zebra/bridge_state.json`
+Those concerns belong to the companion repositories listed above.
 
-Snapshot 4 asosiy bo'limdan iborat:
-- `scale`: source, port, weight, unit, stable, error, updated_at
-- `zebra`: connected, device state, media state, last_epc, verify, action, error, updated_at
-- `batch`: active, chat_id, item_code, item_name, warehouse, updated_at
-- `print_request`: epc, qty, unit, item_code, item_name, status, error, requested_at, updated_at
+## Core Modules
 
-Namuna:
-```json
-{
-  "scale": {
-    "source": "serial",
-    "port": "/dev/ttyUSB0",
-    "weight": 1.25,
-    "unit": "kg",
-    "stable": true,
-    "updated_at": "2026-02-20T10:10:10.123Z"
-  },
-  "zebra": {
-    "connected": true,
-    "device_path": "/dev/usb/lp0",
-    "last_epc": "3034257BF7194E406994036B",
-    "verify": "MATCH",
-    "action": "encode",
-    "updated_at": "2026-02-20T10:10:10.456Z"
-  },
-  "batch": {
-    "active": true,
-    "chat_id": 123456789,
-    "item_code": "ITEM-001",
-    "item_name": "Green Tea",
-    "warehouse": "Stores - A",
-    "updated_at": "2026-02-20T10:10:09.999Z"
-  },
-  "updated_at": "2026-02-20T10:10:10.500Z"
-}
-```
+### `cmd/mobileapi` and `internal/mobileapi`
+This is the application-layer API consumed by `gscale-mobile-app`. It handles:
 
-## 5. Asosiy algoritmlar
-### 5.1 Stable qty cycle detection
-Parametrlar:
-- `StableFor = 1s`
-- `Epsilon = 0.005`
-- `MinWeight = 0.0`
+- ERP setup and validation,
+- default warehouse configuration,
+- item and warehouse search delegation,
+- batch start and stop operations,
+- monitor and archive endpoints.
 
-Qoidalar:
-1. `weight <= 0` yoki invalid qiymat bo'lsa holat reset bo'lishi mumkin, lekin `0` yangi cycle uchun majburiy shart emas.
-2. Oqim bir nuqtada `StableFor` davomida `|w - candidate| <= Epsilon` bo'lsa stable nuqta qabul qilinadi.
-3. Yangi cycle faqat oldingi stable holatdan keyin haqiqiy `movement/unstable` faza kuzatilganda ochiladi.
-4. Keyingi stable nuqta oldingisidan katta, kichik yoki hatto deyarli teng bo'lishi mumkin.
-5. Ma'no jihatdan model `stable -> movement -> next stable` ko'rinishida ishlaydi.
+In production terms, this is the operator-facing control plane.
 
-### 5.2 EPC generatsiya
-24 belgilik uppercase hex format:
-- prefiks: `30`
-- vaqtga bog'liq qism: `unix nano`dan hosil qilingan 56-bit bo'lak
-- tail: vaqt + seq + process salt aralashmasi
+### `scale`
+The scale worker is the device-facing execution engine. It:
 
-Natija:
-- tez-tez triggerlarda ham collision ehtimoli juda past;
-- restartdan keyin ham salt sababli farqlanish saqlanadi.
+- reads scale values from serial devices or a bridge endpoint,
+- detects stable positive readings,
+- consumes `print_request` instructions from bridge state,
+- executes Zebra encode and print operations when Zebra is enabled,
+- reports device status back into shared state.
 
-### 5.3 Zebra encode va verify
-`scale` ichida encode oqimi:
-1. RFID ultra settings qo'llanadi (`rfid.enable`, power, tries, va boshqalar).
-2. ZPL stream bilan EPC yozish (`^RFW,H,,,A`).
-3. `rfid.error.response` sampling orqali `WRITTEN/NO TAG/ERROR/UNKNOWN` infer.
-4. Kerak bo'lsa readback bilan qo'shimcha tekshiruv.
-5. `verify` va `last_epc` bridge state'ga yoziladi.
+### `polygon`
+`polygon` is the development simulator. It provides:
 
-`verify` muvaffaqiyat qiymatlari:
-- `MATCH`, `OK`, `WRITTEN`
+- fake scale cycles,
+- fake printer completion,
+- controlled scenarios for repeated batch testing,
+- a reproducible environment for end-to-end workflow verification.
 
-### 5.4 Botdagi draft yaratish mezoni
-Bot batch loop'i:
-1. bridge state'dan stable musbat qty kutadi.
-2. shu cycle uchun EPC generatsiya qiladi.
-3. EPC bilan ERP `Material Receipt` draft yaratadi.
-4. `print_request` orqali worker'ga aynan shu EPC bilan chop etish buyruq yuboradi.
-5. print muvaffaqiyatli bo'lsa draft submit qilinadi.
-6. print muvaffaqiyatsiz bo'lsa draft delete qilinadi.
+It exists to test the full workflow without requiring physical hardware.
 
-Eslatma:
-- duplicate barcode aniqlansa, final printdan oldin yangi candidate EPC bilan qayta urinish qilinadi.
+### `bridge`
+The bridge module is the consistency layer. It stores the shared runtime snapshot at:
 
-## 6. Ishlash oqimi
-### 6.1 End-to-end batch ketma-ketligi
-```text
-Operator -> Telegram: /batch
-Bot -> ERP: item/warehouse qidiruv
-Operator -> Bot: Material Receipt
-Bot -> bridge_state: batch.active=true
-Scale -> bridge_state: live qty/stable
-Bot <- bridge_state: stable qty
-Bot -> ERP: Stock Entry (Material Receipt) draft
-Bot -> bridge_state: print_request pending
-Scale <- bridge_state: print_request
-Scale -> Zebra: EPC encode/print
-Scale -> bridge_state: print_request done/error + zebra status
-Bot <- bridge_state: print result
-Bot -> ERP: submit (success) / delete (error)
-Bot -> Telegram: status update
-```
+`/tmp/gscale-zebra/bridge_state.json`
 
-### 6.2 Qo'shimcha servis komandalar
-- `/log`: `logs/bot` va `logs/scale` fayllarini Telegramga document qilib yuboradi.
-- `/epc`: joriy bot session davomida draftlarda ishlatilgan barcha EPC'larni `.txt` fayl qilib yuboradi.
+This file is treated as the single coordination surface between mobile API, scale worker, and optional bot workflows.
 
-## 7. O'rnatish va ishga tushirish
-### 7.1 Talablar
-- Linux (Ubuntu/Arch sinovdan o'tgan)
-- Go `1.25`
-- USB serial scale qurilmasi
-- Zebra USB LP printer (`/dev/usb/lp*`)
-- Telegram Bot token
-- ERPNext API key/secret
+### `core`
+`core` contains reusable workflow logic:
 
-### 7.2 Development rejimi
-Repo root'da:
+- stable-reading interpretation,
+- EPC generation,
+- material receipt orchestration,
+- print-request waiting and next-cycle waiting semantics.
+
+### `bot`
+The Telegram bot remains in the repository as an alternative operator interface. It is no longer the primary control surface when the mobile-first architecture is used, but it remains a valid runtime path.
+
+### `zebra`
+`zebra` is a utility and diagnostics module. It is useful for:
+
+- printer discovery,
+- calibration,
+- RFID test commands,
+- direct device troubleshooting.
+
+The actual runtime print path, however, is executed by the `scale` worker.
+
+## Runtime Contracts With Companion Repositories
+
+### Contract With `gscale-erp-read`
+This repository consumes the ERP read service as a separate process. The contract is:
+
+- item search by query,
+- item detail lookup,
+- item-to-warehouse shortlist lookup,
+- warehouse detail lookup.
+
+This repository assumes that write operations remain here, while catalog reads are delegated outward. See the companion repository:
+
+`https://github.com/accord-erp-automation/gscale-erp-read`
+
+### Contract With `gscale-mobile-app`
+This repository acts as the backend that the mobile client discovers and calls. The mobile application depends on:
+
+- `/healthz`
+- `/v1/mobile/handshake`
+- `/v1/mobile/items`
+- `/v1/mobile/items/{item_code}/warehouses`
+- `/v1/mobile/warehouses`
+- `/v1/mobile/batch/start`
+- `/v1/mobile/batch/stop`
+- `/v1/mobile/monitor/state`
+- `/v1/mobile/archive`
+
+See the companion repository:
+
+`https://github.com/WIKKIwk/gscale-mobile-app`
+
+## Data Model
+
+The bridge-state snapshot is the operational memory of the system. The main sections are:
+
+- `scale`
+- `zebra`
+- `batch`
+- `print_request`
+
+Conceptually:
+
+- `scale` describes the current measurement,
+- `zebra` describes the current printer or RFID state,
+- `batch` describes the currently active operator transaction,
+- `print_request` describes the pending print command produced by workflow logic.
+
+This repository treats the bridge state as a low-friction integration boundary. That decision simplifies decoupling but increases the importance of careful atomic update logic.
+
+## Execution Modes
+
+### Production-Oriented Runtime
+Use the normal runtime when real hardware should be involved:
+
 ```bash
-make build
-make test
+make run
 ```
 
-Scale + auto bot:
+or explicit service installation:
+
 ```bash
-make run SCALE_DEVICE=/dev/ttyUSB0 ZEBRA_DEVICE=/dev/usb/lp0
+make autostart-install
 ```
 
-Faqat scale:
+This path is intended for persistent systemd-style execution.
+
+### Development Runtime
+Development mode launches a clean local stack:
+
+```bash
+make run-dev
+```
+
+By design, this mode:
+
+- starts `polygon`,
+- starts `mobileapi`,
+- starts the `scale` worker with `--no-zebra`,
+- uses simulator-driven print completion instead of real printer I/O.
+
+If a quieter simulator is needed, auto scale cycles can be disabled:
+
+```bash
+make run-dev POLYGON_AUTO=false
+```
+
+### Simulator-Only Runtime
+
+```bash
+make run-polygon
+```
+
+### Scale-Only Runtime
+
 ```bash
 make run-scale SCALE_DEVICE=/dev/ttyUSB0 ZEBRA_DEVICE=/dev/usb/lp0
 ```
 
-Faqat bot:
-```bash
-cd bot
-cp .env.example .env
-# tokenni to'ldiring
-cp config/core.env.example config/core.env
-# core ERP credentials ni config/core.env ichida to'ldiring
-go run ./cmd/bot
-```
+## Configuration
 
-### 7.3 Systemd autostart (repo rejimi)
-```bash
-make run
-# yoki
-make autostart-install
-make autostart-status
-```
+The central configuration file for ERP-facing operations is:
 
-`make run` endi persistent service rejimi: `scale + mobileapi` ni systemd orqali
-install qiladi, start qiladi va reboot'dan keyin ham avtomatik ko'taradi.
+`config/core.env`
 
-Bot kerak bo'lsa:
+Important keys:
 
-```bash
-make autostart-install-bot
-```
-
-Foreground rejim kerak bo'lsa:
-
-```bash
-make run-foreground
-```
-
-### 7.4 Release paket
-```bash
-make release
-# yoki
-make release-all
-```
-
-Natija `dist/` ichida Linux tarball ko'rinishida hosil bo'ladi.
-
-## 8. Konfiguratsiya
-### 8.1 Bot (`bot/.env`)
-Majburiy:
-- `TELEGRAM_BOT_TOKEN`
-
-### 8.2 Core (`config/core.env`)
-Majburiy:
-- `ERP_URL`
-- `ERP_API_KEY`
-- `ERP_API_SECRET`
-
-Ixtiyoriy:
-- `ERP_READ_URL`
-- `BRIDGE_STATE_FILE` (default: `/tmp/gscale-zebra/bridge_state.json`)
-
-### 8.3 Scale (`flags`)
-Asosiy flaglar:
-- `--device`, `--baud`, `--baud-list`
-- `--bridge-url`, `--bridge-interval`, `--no-bridge`
-- `--zebra-device`, `--zebra-interval`, `--no-zebra`
-- `--bot-dir`, `--no-bot`
-- `--bridge-state-file`
-
-### 8.4 Deploy env (systemd)
-`deploy/config/scale.env.example`:
-- `SCALE_DEVICE`
-- `ZEBRA_DEVICE`
-- `BRIDGE_STATE_FILE`
-
-`deploy/config/bot.env.example`:
-- `TELEGRAM_BOT_TOKEN`
-
-`deploy/config/core.env.example`:
 - `ERP_URL`
 - `ERP_READ_URL`
 - `ERP_API_KEY`
 - `ERP_API_SECRET`
 - `BRIDGE_STATE_FILE`
+- `WAREHOUSE_MODE`
+- `DEFAULT_WAREHOUSE`
 
-`deploy/config/mobileapi.env.example`:
-- `MOBILE_API_ADDR`
-- `MOBILE_API_CANDIDATE_PORTS`
-- `MOBILE_API_SERVER_NAME`
+The mobile API also supports a runtime-local setup file, used heavily in development:
 
-Bu fayl ixtiyoriy. `mobileapi` default qiymatlar bilan ham ishga tushadi.
+- `MOBILE_API_SETUP_FILE`
 
-## 9. Buyruqlar va boshqaruv
-### 9.1 Make targetlar
-- `make run`: persistent systemd stack (scale + mobileapi)
-- `make run-foreground`: scale worker + mobileapi sidecar (foreground, botsiz)
-- `make run-scale`: faqat scale
-- `make run-bot`: faqat bot
-- `make test`: barcha modul testlari
-- `make autostart-install|status|restart|stop` - scale + mobileapi systemd stack
-- `make autostart-install-bot` - botni ham systemd stackka qo'shadi
+## Development Notes
 
-`make run-dev` ishlatayotganda shu laptopda `gscale-scale.service` yoki
-`gscale-mobileapi.service` parallel ishlamasligi kerak; aks holda mobile app
-noto'g'ri serverga ulanib qolishi mumkin.
+### Why `run-dev` Must Start Clean
+The development stack can behave unpredictably if stale `polygon`, `mobileapi`, or `scale` processes remain alive. For that reason, `run-dev` now performs an aggressive cleanup pass before starting a new stack. This prevents duplicated fake scale cycles and duplicated print-request handling.
 
-### 9.2 Bot komandalar
-- `/start`: ERP ulanish tekshiruvi
-- `/batch`: batch tanlash va ishga tushirish oqimi
-- `/log`: workflow log fayllarini yuborish
-- `/epc`: session bo'yicha EPC ro'yxatini `.txt` yuborish
+### Why `gscale-erp-read` Is Not Embedded Into `run-dev`
+The ERP read service is modeled as a companion service, not as an implementation detail of `run-dev`. This mirrors production architecture more accurately and keeps the boundary between runtime orchestration and ERP-side read access explicit.
 
-### 9.3 Scale worker
-Scale endi terminal TUI’siz ishlaydi; operator interfeysi mobile app yoki bot orqali boshqariladi.
+## Testing Strategy
 
-### 9.4 Zebra utilita
-```bash
-cd zebra
-go run . help
-```
-Asosiy komandalar:
-- `list`, `status`, `settings`, `setvar`, `raw-getvar`
-- `print-test`, `epc-test`, `read-epc`, `calibrate`, `self-check`
+This repository provides two levels of confidence:
 
-## 10. Loglash, monitoring va xatoliklar
-Log papkalar:
-- `logs/scale/`
-- `logs/bot/`
+- unit and package tests through `go test ./...`,
+- live end-to-end simulation through `run-dev` plus `polygon`.
 
-Muhim xususiyat:
-- har process restart bo'lganda o'z log papkasini tozalab, yangi sessiya ochadi.
+The companion `gscale-erp-read` repository should also be tested independently because item-catalog behavior is partly defined outside this repository.
 
-### Tipik xatoliklar
-1. `device busy`:
-- odatda printer portini boshqa process band qilgan bo'ladi.
+## Recommended Reading Order
 
-2. `serial device topilmadi`:
-- `SCALE_DEVICE` ni aniq berish yoki udev orqali portni tekshirish kerak.
+For a first-time reviewer, the most productive reading order is:
 
-3. `ERP auth/http xato`:
-- `.env` dagi URL, key, secret qiymatlarini tekshirish zarur.
+1. this README,
+2. `internal/mobileapi`,
+3. `core/workflow`,
+4. `scale`,
+5. `polygon`,
+6. the `gscale-erp-read` README,
+7. the `gscale-mobile-app` README.
 
-4. `epc timeout`:
-- Zebra kechikishi yoki state update timing sabab bo'lishi mumkin.
+## Companion References
 
-## 11. Test va verifikatsiya
-Loyihada unit testlar mavjud:
-- `core`: stable detector va EPC uniqueness
-- `bridge`: store update/read atomarligi
-- `scale`: parser, frame parsing, zebra stream building
-- `bot`: command parsing, ERP payload, log discovery, EPC history
+- `gscale-erp-read`: read-only ERP catalog service and item filtering logic.
+- `gscale-mobile-app`: operator-facing mobile client and field workflow UX.
 
-Joriy holatda barcha testlar o'tadi:
-```bash
-make test
-```
-
-## 12. Cheklovlar va rivojlantirish yo'nalishlari
-### Amaldagi cheklovlar
-- asosiy target platforma Linux;
-- `Receipt` flow callback hozir placeholder holatda;
-- EPC history (`/epc`) hozircha process-memory'da (restartda tozalanadi);
-- draft yaratishda `verify` muvaffaqiyatsiz bo'lsa ham EPC bo'lsa draft yaratiladi.
-
-### Tavsiya etilgan keyingi ishlar
-1. `verify` bo'yicha qat'iy policy qo'shish (`strict/lenient` mode).
-2. `/epc` tarixini persistent storage'ga (SQLite/append-only log) ko'chirish.
-3. Bridge state uchun schema-versioning va migratsiya.
-4. Metrics (Prometheus) va health endpoint qo'shish.
-5. E2E integration test (mock ERP + mock bridge + replay traces).
-
----
-
-Agar bu README'ni diplom/amaliy ish formatiga to'liq moslashtirish kerak bo'lsa, keyingi bosqichda men siz uchun qo'shimcha `docs/` paketini ham tayyorlab bera olaman:
-- `docs/architecture.md`
-- `docs/algorithm.md`
-- `docs/experiment-results.md`
-- `docs/appendix-api-contracts.md`
+Each repository is intentionally incomplete when read in isolation. They are designed to be understood as one coordinated system.
