@@ -674,18 +674,44 @@ func (c *erpClient) SearchWarehouses(ctx context.Context, query string, limit in
 	if limit > 50 {
 		limit = 50
 	}
+	query = strings.TrimSpace(query)
 
 	c.resolveReadURL(ctx)
+	var readErr error
 	if c.readURL != "" {
-		// The read service currently exposes warehouse detail lookups only, so
-		// the mobile picker falls back to ERP resource queries below.
+		q := url.Values{}
+		q.Set("limit", strconv.Itoa(limit))
+		if query != "" {
+			q.Set("query", query)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.readURL+"/v1/warehouses?"+q.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			readErr = err
+		} else {
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+			if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+				var payload erpWarehouseListResponse
+				if err := json.Unmarshal(body, &payload); err != nil {
+					return nil, fmt.Errorf("erp read warehouse list json parse xato: %w", err)
+				}
+				return normalizeERPWarehouseChoices(payload), nil
+			}
+			readErr = fmt.Errorf("erp read warehouse list http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+	}
+	if strings.TrimSpace(c.baseURL) == "" && readErr != nil {
+		return nil, readErr
 	}
 
 	q := url.Values{}
 	q.Set("fields", `[`+"\"name\",\"company\""+`]`)
 	q.Set("limit_page_length", strconv.Itoa(limit))
 	q.Set("order_by", "name asc")
-	query = strings.TrimSpace(query)
 	if query != "" {
 		pattern := "%" + query + "%"
 		orFilters := [][]interface{}{

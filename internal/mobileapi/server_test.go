@@ -330,6 +330,44 @@ func TestWarehouseListEndpointReturnsWarehouseChoices(t *testing.T) {
 	}
 }
 
+func TestWarehouseListEndpointUsesReadService(t *testing.T) {
+	t.Parallel()
+
+	readService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/warehouses" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.URL.Query().Get("query"); got != "stores" {
+			t.Fatalf("query = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"name":"Stores - A","company":"Read Co"}]}`))
+	}))
+	defer readService.Close()
+
+	server := New(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: t.TempDir() + "/bridge_state.json",
+		ERPReadURL:      readService.URL,
+	})
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/mobile/warehouses?query=stores", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("warehouse list status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"warehouse":"Stores - A"`)) {
+		t.Fatalf("warehouse list body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"company":"Read Co"`)) {
+		t.Fatalf("warehouse list body = %s", rec.Body.String())
+	}
+}
+
 func TestBatchStartStopEndpoints(t *testing.T) {
 	t.Parallel()
 
