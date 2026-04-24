@@ -1,4 +1,7 @@
 mobile_app/
-hard_con_v2/
+gscale-mobile-app/
+gscale-erp-read-rs/
+gscale
+bin/
 config/core.env
 bot/.env.backup_*
