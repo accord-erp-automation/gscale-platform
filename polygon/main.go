@@ -27,6 +27,8 @@ type config struct {
 	httpAddr        string
 	tick            time.Duration
 	printDelay      time.Duration
+	disableScale    bool
+	disablePrinter  bool
 	auto            bool
 	printMode       string
 	scenario        string
@@ -79,6 +81,8 @@ type simulator struct {
 	mu sync.Mutex
 
 	store      *bridgestate.Store
+	scaleSim   bool
+	printerSim bool
 	auto       bool
 	printMode  string
 	scenario   string
@@ -141,6 +145,8 @@ func parseFlags() config {
 	flag.StringVar(&cfg.httpAddr, "http-addr", defaultHTTPAddr, "polygon HTTP listen address")
 	flag.DurationVar(&cfg.tick, "tick", 250*time.Millisecond, "polygon tick interval")
 	flag.DurationVar(&cfg.printDelay, "print-delay", 1100*time.Millisecond, "fake print completion delay")
+	flag.BoolVar(&cfg.disableScale, "no-scale-sim", false, "disable fake scale snapshots and /api/v1/scale")
+	flag.BoolVar(&cfg.disablePrinter, "no-printer-sim", false, "disable fake Zebra snapshots and print_request completion")
 	flag.BoolVar(&cfg.auto, "auto", true, "enable automatic fake scale cycles")
 	flag.StringVar(&cfg.printMode, "print-mode", "success", "fake print mode: success|fail|alternate")
 	flag.StringVar(&cfg.scenario, "scenario", "batch-flow", "fake scale scenario: batch-flow|idle|stress|calibration")
@@ -165,6 +171,8 @@ func newSimulator(cfg config) *simulator {
 	}
 	return &simulator{
 		store:      bridgestate.New(strings.TrimSpace(cfg.bridgeStateFile)),
+		scaleSim:   !cfg.disableScale,
+		printerSim: !cfg.disablePrinter,
 		auto:       cfg.auto,
 		printMode:  normalizePrintMode(cfg.printMode),
 		scenario:   normalizeScenario(cfg.scenario),
@@ -362,8 +370,10 @@ func (s *simulator) bootstrap(now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.applyCycleFrameLocked(now)
-	return s.writeScaleAndZebraLocked(now)
+	if s.scaleSim {
+		s.applyCycleFrameLocked(now)
+	}
+	return s.writeSimulatedStateLocked(now)
 }
 
 func (s *simulator) run(ctx context.Context, tick time.Duration) {
@@ -386,13 +396,41 @@ func (s *simulator) tick(now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.auto && (s.nextCycleAt.IsZero() || !now.Before(s.nextCycleAt)) {
+	if s.scaleSim && s.auto && (s.nextCycleAt.IsZero() || !now.Before(s.nextCycleAt)) {
 		s.advanceCycleLocked(now)
 	}
-	if err := s.processPrintRequestLocked(now); err != nil {
-		return err
+	if s.printerSim {
+		if err := s.processPrintRequestLocked(now); err != nil {
+			return err
+		}
 	}
-	return s.writeScaleAndZebraLocked(now)
+	return s.writeSimulatedStateLocked(now)
+}
+
+func (s *simulator) writeSimulatedStateLocked(now time.Time) error {
+	if !s.scaleSim && !s.printerSim {
+		return nil
+	}
+
+	var scale bridgestate.ScaleSnapshot
+	if s.scaleSim {
+		scale = s.scaleScale
+		scale.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
+	}
+	var zebra bridgestate.ZebraSnapshot
+	if s.printerSim {
+		zebra = s.zebra
+		zebra.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
+	}
+
+	return s.store.Update(func(snapshot *bridgestate.Snapshot) {
+		if s.scaleSim {
+			snapshot.Scale = scale
+		}
+		if s.printerSim {
+			snapshot.Zebra = zebra
+		}
+	})
 }
 
 func (s *simulator) advanceCycleLocked(now time.Time) {
@@ -515,18 +553,6 @@ func (s *simulator) resolvePrintSuccessLocked() bool {
 	}
 }
 
-func (s *simulator) writeScaleAndZebraLocked(now time.Time) error {
-	scale := s.scaleScale
-	scale.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
-	zebra := s.zebra
-	zebra.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
-
-	return s.store.Update(func(snapshot *bridgestate.Snapshot) {
-		snapshot.Scale = scale
-		snapshot.Zebra = zebra
-	})
-}
-
 func (s *simulator) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
@@ -547,8 +573,10 @@ func (s *simulator) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":   true,
-		"name": "polygon",
+		"ok":               true,
+		"name":             "polygon",
+		"simulate_scale":   s.scaleSim,
+		"simulate_printer": s.printerSim,
 	})
 }
 
@@ -559,6 +587,14 @@ func (s *simulator) handleScale(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+	if !s.scaleSim {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok":    false,
+			"error": "scale simulation is disabled",
+		})
+		return
+	}
 	scale := s.scaleScale
 	raw := s.scaleRaw
 	s.mu.Unlock()
@@ -602,6 +638,19 @@ func (s *simulator) handlePrinter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+	if !s.printerSim {
+		mode := s.printMode
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":               true,
+			"simulate_printer": false,
+			"print_mode":       mode,
+			"active_epc":       "",
+			"history":          []printerCommand{},
+			"message":          "printer simulation is disabled",
+		})
+		return
+	}
 	history := append([]printerCommand(nil), s.printerHistory...)
 	mode := s.printMode
 	active := s.activePrintEPC
@@ -632,6 +681,11 @@ func (s *simulator) handleAuto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+	if !s.scaleSim {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "scale simulation is disabled"})
+		return
+	}
 	s.auto = *payload.Enabled
 	if s.auto {
 		s.applyCycleFrameLocked(time.Now())
@@ -646,11 +700,12 @@ func (s *simulator) handleScenario(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		s.mu.Lock()
 		payload := map[string]any{
-			"ok":       true,
-			"scenario": s.scenario,
-			"seed":     s.seed,
-			"auto":     s.auto,
-			"frames":   len(s.cycle),
+			"ok":             true,
+			"simulate_scale": s.scaleSim,
+			"scenario":       s.scenario,
+			"seed":           s.seed,
+			"auto":           s.auto,
+			"frames":         len(s.cycle),
 		}
 		s.mu.Unlock()
 		writeJSON(w, http.StatusOK, payload)
@@ -673,6 +728,11 @@ func (s *simulator) handleScenario(w http.ResponseWriter, r *http.Request) {
 
 		now := time.Now()
 		s.mu.Lock()
+		if !s.scaleSim {
+			s.mu.Unlock()
+			writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "scale simulation is disabled"})
+			return
+		}
 		s.scenario = scenario
 		s.seed = seed
 		s.auto = applyAuto
@@ -680,7 +740,8 @@ func (s *simulator) handleScenario(w http.ResponseWriter, r *http.Request) {
 		s.cycleIndex = 0
 		s.nextCycleAt = time.Time{}
 		s.applyCycleFrameLocked(now)
-		err := s.writeScaleAndZebraLocked(now)
+		frames := len(s.cycle)
+		err := s.writeSimulatedStateLocked(now)
 		s.mu.Unlock()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
@@ -692,7 +753,7 @@ func (s *simulator) handleScenario(w http.ResponseWriter, r *http.Request) {
 			"scenario": scenario,
 			"seed":     seed,
 			"auto":     applyAuto,
-			"frames":   len(s.cycle),
+			"frames":   frames,
 		})
 	default:
 		writeMethodNotAllowed(w)
@@ -718,6 +779,11 @@ func (s *simulator) handleWeight(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 
 	s.mu.Lock()
+	if !s.scaleSim {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "scale simulation is disabled"})
+		return
+	}
 	s.auto = false
 	weight := *payload.Weight
 	unit := fallback(payload.Unit, "kg")
@@ -732,7 +798,7 @@ func (s *simulator) handleWeight(w http.ResponseWriter, r *http.Request) {
 	s.scaleScale.Port = "polygon://scale"
 	s.scaleRaw = formatScaleRaw(weight, stable)
 	s.scaleScale.Error = ""
-	err := s.writeScaleAndZebraLocked(now)
+	err := s.writeSimulatedStateLocked(now)
 	s.mu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
@@ -756,6 +822,11 @@ func (s *simulator) handleReset(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	s.mu.Lock()
+	if !s.scaleSim {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "scale simulation is disabled"})
+		return
+	}
 	s.auto = false
 	zero := 0.0
 	stable := true
@@ -764,7 +835,7 @@ func (s *simulator) handleReset(w http.ResponseWriter, r *http.Request) {
 	s.scaleScale.Unit = "kg"
 	s.scaleRaw = formatScaleRaw(zero, stable)
 	s.scaleScale.Error = ""
-	err := s.writeScaleAndZebraLocked(now)
+	err := s.writeSimulatedStateLocked(now)
 	s.mu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
@@ -787,6 +858,11 @@ func (s *simulator) handlePrintMode(w http.ResponseWriter, r *http.Request) {
 	}
 	mode := normalizePrintMode(payload.Mode)
 	s.mu.Lock()
+	if !s.printerSim {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "printer simulation is disabled"})
+		return
+	}
 	s.printMode = mode
 	s.mu.Unlock()
 

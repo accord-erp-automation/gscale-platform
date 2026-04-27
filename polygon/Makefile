@@ -6,6 +6,8 @@ PRINT_MODE ?= success
 PRINT_DELAY ?= 1100ms
 SCENARIO ?= batch-flow
 SEED ?= 42
+NO_SCALE_SIM ?= false
+NO_PRINTER_SIM ?= false
 
 .PHONY: help run build test fresh-state
 
@@ -19,13 +21,14 @@ help:
 	@echo "  make run HTTP_ADDR=0.0.0.0:18000"
 	@echo "  make run PRINT_MODE=alternate"
 	@echo "  make run SCENARIO=stress"
+	@echo "  make run NO_PRINTER_SIM=true # faqat scale simulyatsiya qiladi"
 
 fresh-state:
 	@mkdir -p $$(dirname "$(BRIDGE_STATE_FILE)")
 	@rm -f "$(BRIDGE_STATE_FILE)" "$(BRIDGE_STATE_FILE).lock"
 
 run: fresh-state
-	go run . --http-addr "$(HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" --print-mode "$(PRINT_MODE)" --print-delay "$(PRINT_DELAY)" --scenario "$(SCENARIO)" --seed "$(SEED)"
+	go run . --http-addr "$(HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" --print-mode "$(PRINT_MODE)" --print-delay "$(PRINT_DELAY)" --scenario "$(SCENARIO)" --seed "$(SEED)" --no-scale-sim="$(NO_SCALE_SIM)" --no-printer-sim="$(NO_PRINTER_SIM)"
 
 build:
 	go build .

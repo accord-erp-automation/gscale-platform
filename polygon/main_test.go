@@ -162,6 +162,68 @@ func TestTickCompletesPendingPrintRequest(t *testing.T) {
 	}
 }
 
+func TestPrinterSimulationCanBeDisabled(t *testing.T) {
+	t.Parallel()
+
+	stateFile := t.TempDir() + "/bridge_state.json"
+	store := bridgestate.New(stateFile)
+	now := time.Date(2026, 4, 8, 12, 0, 0, 0, time.UTC)
+	qty := 1.25
+
+	if err := store.Update(func(snapshot *bridgestate.Snapshot) {
+		snapshot.Zebra = bridgestate.ZebraSnapshot{
+			Connected:   true,
+			DevicePath:  "/dev/usb/lp0",
+			Name:        "Real Zebra",
+			DeviceState: "ready",
+			Verify:      "REAL",
+		}
+		snapshot.PrintRequest = bridgestate.PrintRequestSnapshot{
+			EPC:         "3034257BF7194E406994036B",
+			Qty:         &qty,
+			Unit:        "kg",
+			ItemCode:    "ITEM-001",
+			ItemName:    "Real Printer Test",
+			Status:      "pending",
+			RequestedAt: now.UTC().Format(time.RFC3339Nano),
+			UpdatedAt:   now.UTC().Format(time.RFC3339Nano),
+		}
+	}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	sim := newSimulator(config{
+		bridgeStateFile: stateFile,
+		disablePrinter:  true,
+		auto:            false,
+		printMode:       "success",
+		printDelay:      time.Second,
+	})
+	if err := sim.bootstrap(now); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if err := sim.tick(now.Add(1200 * time.Millisecond)); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	snap, err := store.Read()
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if snap.PrintRequest.Status != "pending" {
+		t.Fatalf("print request status = %q", snap.PrintRequest.Status)
+	}
+	if snap.Zebra.DevicePath != "/dev/usb/lp0" {
+		t.Fatalf("zebra device was overwritten: %q", snap.Zebra.DevicePath)
+	}
+	if len(sim.printerHistory) != 0 {
+		t.Fatalf("printer history len = %d", len(sim.printerHistory))
+	}
+	if snap.Scale.Source != "polygon" {
+		t.Fatalf("scale source = %q", snap.Scale.Source)
+	}
+}
+
 func TestDefaultCycleHasBurstAndPausePattern(t *testing.T) {
 	t.Parallel()
 

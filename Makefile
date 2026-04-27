@@ -7,6 +7,8 @@ POLYGON_HTTP_ADDR ?= 127.0.0.1:18000
 POLYGON_SCENARIO ?= batch-flow
 POLYGON_SEED ?= 42
 POLYGON_AUTO ?= true
+NO_SCALE_SIM ?= false
+NO_PRINTER_SIM ?= true
 RUN_DEV_PORT_SCAN ?= 40
 APP_USER ?= $(shell id -un)
 APP_GROUP ?= $(shell id -gn)
@@ -61,6 +63,7 @@ help:
 	@echo "Override:"
 	@echo "  make run SCALE_DEVICE=/dev/ttyUSB1 ZEBRA_DEVICE=/dev/usb/lp0"
 	@echo "  make run-polygon SCENARIO=stress"
+	@echo "  make run-polygon NO_PRINTER_SIM=false # scale + printer simulyatsiyasi"
 	@echo "  make run-dev POLYGON_AUTO=false # fake scale auto cycles o'chirish"
 	@echo "  make run-mobile MOBILE_API_BASE_URL=http://127.0.0.1:39117"
 	@echo "  make run-mobile-android MOBILE_APP_DIR=/path/to/mobile_app"
@@ -164,12 +167,12 @@ run-bot: check-env fresh-bridge-state stop-bot-services
 	cd bot && go run ./cmd/bot
 
 run-polygon: fresh-bridge-state stop-dev-services stop-bot-services
-	$(MAKE) -C polygon run
+	$(MAKE) -C polygon run NO_SCALE_SIM="$(NO_SCALE_SIM)" NO_PRINTER_SIM="$(NO_PRINTER_SIM)"
 
 run-test: fresh-bridge-state stop-dev-services stop-bot-services
 	@POLY_PID=""; \
 	trap 'if [ -n "$$POLY_PID" ]; then kill $$POLY_PID 2>/dev/null || true; fi' EXIT INT TERM; \
-	(cd polygon && go run . --http-addr "$(POLYGON_HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" >/tmp/gscale-zebra/polygon.log 2>&1) & \
+	(cd polygon && go run . --http-addr "$(POLYGON_HTTP_ADDR)" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" --no-scale-sim="$(NO_SCALE_SIM)" --no-printer-sim="$(NO_PRINTER_SIM)" >/tmp/gscale-zebra/polygon.log 2>&1) & \
 	POLY_PID=$$!; \
 	sleep 1; \
 	cd scale && go run . --no-bot --no-zebra --bridge-url "http://$(POLYGON_HTTP_ADDR)/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)"
@@ -177,7 +180,7 @@ run-test: fresh-bridge-state stop-dev-services stop-bot-services
 run-dev: fresh-bridge-state
 	@$(MAKE) hard-clean-dev-services >/dev/null 2>&1 || true
 	@$(MAKE) stop-bot-services >/dev/null 2>&1 || true
-	@$(MAKE) stop-gscale-systemd-services >/dev/null
+	@$(MAKE) stop-gscale-systemd-services
 	@go build -o "$(POLYGON_DEV_BIN)" ./polygon
 	@go build -o "$(MOBILEAPI_DEV_BIN)" ./cmd/mobileapi
 	@POLY_PID=""; \
@@ -255,7 +258,7 @@ run-dev: fresh-bridge-state
 	if [ "$$MOBILE_API_PORT" != "$$MOBILE_API_PRIMARY_PORT" ]; then \
 		printf '[run-dev] mobileapi port busy, using %s\n' "$$MOBILE_API_ADDR_RESOLVED"; \
 	fi; \
-	"$(POLYGON_DEV_BIN)" --http-addr "$$POLYGON_ADDR" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" --auto="$(POLYGON_AUTO)" >/tmp/gscale-zebra/polygon.log 2>&1 & \
+	"$(POLYGON_DEV_BIN)" --http-addr "$$POLYGON_ADDR" --bridge-state-file "$(BRIDGE_STATE_FILE)" --scenario "$(POLYGON_SCENARIO)" --seed "$(POLYGON_SEED)" --auto="$(POLYGON_AUTO)" --no-scale-sim="$(NO_SCALE_SIM)" --no-printer-sim="$(NO_PRINTER_SIM)" >/tmp/gscale-zebra/polygon.log 2>&1 & \
 	POLY_PID=$$!; \
 	echo "$$POLY_PID" >/tmp/gscale-zebra/polygon.pid; \
 	for i in $$(seq 1 40); do \
@@ -285,7 +288,7 @@ run-dev: fresh-bridge-state
 	fi; \
 	rm -f "$(SCALE_DEV_LAUNCH_LOG)"; \
 	touch "$(SCALE_DEV_LAUNCH_LOG)"; \
-	( cd "$(CURDIR)/scale" && exec go run . --no-bot --no-zebra --bridge-url "http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)" ) >"$(SCALE_DEV_LAUNCH_LOG)" 2>&1 & \
+	( cd "$(CURDIR)/scale" && exec go run . --no-bot --bridge-url "http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT/api/v1/scale" --bridge-state-file "$(BRIDGE_STATE_FILE)" --zebra-device "$(ZEBRA_DEVICE)" ) >"$(SCALE_DEV_LAUNCH_LOG)" 2>&1 & \
 	SCALE_PID=$$!; \
 	echo "$$SCALE_PID" >/tmp/gscale-zebra/scale.pid; \
 	sleep 2; \
@@ -333,7 +336,11 @@ stop-gscale-systemd-services:
 		done; \
 		if [ -n "$$UNITS" ]; then \
 			echo "[run-dev] stopping systemd services:$${UNITS}"; \
-			sudo systemctl stop $$UNITS; \
+			sudo -n systemctl stop $$UNITS || { \
+				echo "run-dev: systemd services active, lekin sudo parolsiz stop bo'lmadi"; \
+				echo "run-dev: avval qo'lda bajaring: sudo systemctl stop$${UNITS}"; \
+				exit 1; \
+			}; \
 		fi; \
 	fi
 
