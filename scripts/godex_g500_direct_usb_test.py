@@ -17,6 +17,7 @@ import secrets
 import sys
 import time
 import textwrap
+import unicodedata
 
 import usb.core
 import usb.util
@@ -176,6 +177,7 @@ def random_batch_code() -> str:
 
 
 def sanitize_label_text(v: str) -> str:
+    v = unicodedata.normalize("NFKC", v)
     v = v.replace("\r", " ").replace("\n", " ")
     v = v.replace("^", " ").replace("~", " ")
     return " ".join(v.split()).strip()
@@ -211,7 +213,22 @@ def wrap_text_for_width(
         return [""]
     char_width = max(1, pitch_dots * max(1, x_mul))
     width_chars = max(min_chars, width_dots // char_width)
-    return textwrap.wrap(text, width=width_chars, break_long_words=False) or [text]
+    wrapped = textwrap.wrap(
+        text,
+        width=width_chars,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    if not wrapped:
+        return [text]
+    if any(len(line) > width_chars for line in wrapped):
+        wrapped = textwrap.wrap(
+            text,
+            width=width_chars,
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+    return wrapped or [text]
 
 
 def mm_to_dots(mm: float, dpi: int) -> int:
@@ -308,6 +325,12 @@ def send(dev, ep_out, ep_in, command, read=False, pause=0.12):
         return bytes(data).decode("latin1", "replace").strip()
     except Exception:
         return ""
+
+
+def write_raw(dev, ep_out, payload: bytes, chunk_size: int = 4096) -> None:
+    for offset in range(0, len(payload), chunk_size):
+        chunk = payload[offset : offset + chunk_size]
+        dev.write(ep_out.bEndpointAddress, chunk, timeout=2000)
 
 
 def recover(dev, ep_out, ep_in):
