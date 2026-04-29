@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import argparse
 import io
+import subprocess
 import time
 import sys
 from pathlib import Path
-from urllib.parse import quote, quote_plus
+from urllib.parse import quote_plus
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 # Make the repository root importable when this script is run directly.
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,8 +43,9 @@ from scripts.godex_g500_direct_usb_test import (
     write_raw,
 )
 
-DEFAULT_QR_BASE_URL = "HTTPS://SCAN.WSPACE.SBS/L/"
+DEFAULT_QR_BASE_URL = "https://scan.wspace.sbs/L/"
 TEXT_GRAPHIC_NAME = "TEXTLBL"
+QR_GRAPHIC_NAME = "QRLBL"
 NOTO_SANS_REGULAR = Path("/usr/share/fonts/noto/NotoSans-Regular.ttf")
 NOTO_SANS_BOLD = Path("/usr/share/fonts/noto/NotoSans-Bold.ttf")
 
@@ -57,6 +59,48 @@ def text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFon
         return 0
     box = draw.textbbox((0, 0), text, font=font)
     return box[2] - box[0]
+
+
+def encode_scan_payload(
+    company_name: str,
+    product_name: str,
+    kg_text: str,
+    brutto_text: str,
+    epc: str,
+) -> str:
+    compact_payload = "/".join(
+        quote_plus(value, safe="")
+        for value in (company_name, product_name, kg_text, brutto_text, epc)
+    )
+    return f"{DEFAULT_QR_BASE_URL}{compact_payload}"
+
+
+def render_qr_graphic(payload: str, box_dots: int) -> bytes:
+    proc = subprocess.run(
+        [
+            "qrencode",
+            "-t",
+            "PNG",
+            "-l",
+            "L",
+            "-m",
+            "4",
+            "-s",
+            "1",
+            "-o",
+            "-",
+            payload,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    source = Image.open(io.BytesIO(proc.stdout)).convert("1")
+    if source.width != box_dots or source.height != box_dots:
+        resample = getattr(Image, "Resampling", Image).NEAREST
+        source = source.resize((box_dots, box_dots), resample)
+    output = io.BytesIO()
+    source.save(output, format="BMP")
+    return output.getvalue()
 
 
 def wrap_text_pixels(
@@ -108,61 +152,87 @@ def wrap_prefixed_text_pixels(
     prefix: str,
     text: str,
     font: ImageFont.FreeTypeFont,
-    max_width: int,
-) -> tuple[list[str], int]:
+    first_line_width: int,
+    rest_line_width: int,
+) -> list[str]:
     prefix = sanitize_label_text(prefix)
     text = sanitize_label_text(text)
-    prefix_render = f"{prefix} "
+    if not text:
+        return [prefix] if prefix else [""]
+
+    prefix_render = f"{prefix} " if prefix else ""
     prefix_width = text_width(draw, prefix_render, font)
+
+    if not prefix:
+        return wrap_text_pixels(draw, text, font, first_line_width)
+
+    if prefix_width >= first_line_width:
+        return [prefix] + wrap_text_pixels(draw, text, font, rest_line_width)
+
     body_words = text.split()
     if not body_words:
-        return [prefix], prefix_width
+        return [prefix.rstrip()]
 
-    if prefix_width >= max_width:
-        return [prefix] + wrap_text_pixels(draw, text, font, max_width), prefix_width
+    lines: list[str] = []
+    current_words: list[str] = []
+    current_width = first_line_width - prefix_width
+    line_index = 0
 
-    remaining_width = max(1, max_width - prefix_width)
-    first_line_words: list[str] = []
-    consumed = 0
-    for idx, word in enumerate(body_words):
-        candidate = word if not first_line_words else f"{' '.join(first_line_words)} {word}"
-        if text_width(draw, candidate, font) <= remaining_width:
-            first_line_words.append(word)
-            consumed = idx + 1
+    def line_limit_for(index: int) -> int:
+        # Keep the first product line plus the next 5 lines on the same width,
+        # then let any further overflow use the narrower continuation width.
+        return first_line_width if index < 6 else rest_line_width
+
+    for word in body_words:
+        candidate = word if not current_words else f"{' '.join(current_words)} {word}"
+        if text_width(draw, candidate, font) <= current_width:
+            current_words.append(word)
+            continue
+
+        if not lines:
+            lines.append((prefix_render + " ".join(current_words)).rstrip())
         else:
-            break
+            lines.append(" ".join(current_words))
 
-    lines = [prefix_render + " ".join(first_line_words)] if first_line_words else [prefix.rstrip()]
+        line_index += 1
+        current_words = [word]
+        current_width = line_limit_for(line_index)
 
-    remaining_text = " ".join(body_words[consumed:])
-    if remaining_text:
-        lines.extend(wrap_text_pixels(draw, remaining_text, font, max_width))
+    if current_words:
+        if not lines:
+            lines.append((prefix_render + " ".join(current_words)).rstrip())
+        else:
+            lines.append(" ".join(current_words))
 
-    return lines, prefix_width
+    return lines
 
 
 def measure_pack_text(
     company_name: str,
     product_name: str,
     kg_text: str,
+    brutto_text: str,
     epc: str,
-    product_width_dots: int,
-) -> tuple[str, list[str], int, str, str]:
+    product_first_line_width_dots: int,
+    product_rest_line_width_dots: int,
+) -> tuple[str, list[str], str, str, str]:
     scratch = Image.new("1", (1, 1), 1)
     draw = ImageDraw.Draw(scratch)
-    bold_22 = load_font(NOTO_SANS_BOLD, 22)
+    bold_21 = load_font(NOTO_SANS_BOLD, 21)
 
     company_text = f"COMPANY: {company_name}"
-    product_lines, product_indent_dots = wrap_prefixed_text_pixels(
+    product_lines = wrap_prefixed_text_pixels(
         draw,
         "MAHSULOT NOMI:",
         product_name,
-        bold_22,
-        product_width_dots,
+        bold_21,
+        product_first_line_width_dots,
+        product_rest_line_width_dots,
     )
     netto_text = f"NETTO: {kg_text} KG".upper()
+    brutto_text = f"BRUTTO: {brutto_text} KG".upper()
     epc_text = f"EPC: {epc}"
-    return company_text, product_lines, product_indent_dots, netto_text, epc_text
+    return company_text, product_lines, netto_text, brutto_text, epc_text
 
 
 def render_text_graphic(
@@ -172,29 +242,43 @@ def render_text_graphic(
     company_y: int,
     item_y: int,
     qty_y: int,
+    brutto_y: int,
     epc_y: int,
     company_text: str,
     product_lines: list[str],
-    product_indent_dots: int,
     netto_text: str,
+    brutto_text: str,
     epc_text: str,
 ) -> bytes:
     canvas = Image.new("1", (label_width_dots, label_length_dots), 1)
     draw = ImageDraw.Draw(canvas)
 
     regular_20 = load_font(NOTO_SANS_REGULAR, 20)
-    regular_22 = load_font(NOTO_SANS_REGULAR, 22)
+    regular_26 = load_font(NOTO_SANS_REGULAR, 26)
     bold_24 = load_font(NOTO_SANS_BOLD, 24)
-    bold_22 = load_font(NOTO_SANS_BOLD, 22)
+    bold_21 = load_font(NOTO_SANS_BOLD, 21)
 
-    draw.text((left_x, epc_y), epc_text, font=regular_20, fill=0)
+    epc_bbox = draw.textbbox((0, 0), epc_text, font=regular_20)
+    epc_draw_y = epc_y - epc_bbox[1]
+    draw.text((left_x, epc_draw_y), epc_text, font=regular_20, fill=0)
     draw.text((left_x, company_y), company_text, font=bold_24, fill=0)
 
     for idx, line in enumerate(product_lines):
         y = item_y + idx * 28
-        draw.text((left_x, y), line, font=bold_22, fill=0)
+        draw.text((left_x, y), line, font=bold_21, fill=0)
 
-    draw.text((left_x, qty_y), netto_text, font=regular_22, fill=0)
+    draw.text((left_x, qty_y), netto_text, font=regular_26, fill=0)
+    draw.text((left_x, brutto_y), brutto_text, font=regular_26, fill=0)
+
+    ink = ImageChops.invert(canvas.convert("L"))
+    bbox = ink.getbbox()
+    if bbox:
+        left, top, right, bottom = bbox
+        crop_left = max(0, left - 1)
+        crop_top = max(0, top)
+        crop_right = min(canvas.width, right + 1)
+        crop_bottom = min(canvas.height, bottom + 1)
+        canvas = canvas.crop((crop_left, crop_top, crop_right, crop_bottom))
 
     output = io.BytesIO()
     canvas.save(output, format="BMP")
@@ -242,7 +326,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--qr-box-mm",
         type=float,
-        default=14.0,
+        default=18.0,
         help="Approximate QR bounding box size in mm",
     )
     parser.add_argument(
@@ -268,6 +352,7 @@ def build_pack_label(
     company_name: str,
     product_name: str,
     kg_text: str,
+    brutto_text: str,
     epc: str,
     label_length_mm: int,
     label_gap_mm: int,
@@ -276,52 +361,17 @@ def build_pack_label(
     safe_margin_mm: float,
     qr_box_mm: float,
     qr_mode: str,
-) -> tuple[list[str], bytes]:
+) -> tuple[list[str], bytes, bytes]:
     company_name = sanitize_label_text(company_name)
     product_name = sanitize_label_text(product_name)
     kg_text = normalize_kg_value(kg_text)
+    brutto_text = normalize_kg_value(brutto_text)
     epc = sanitize_label_text(epc).upper()
     company_name = company_name.upper()
     product_name = product_name.upper()
     qr_mode = sanitize_label_text(qr_mode).lower()
-
-    if qr_mode == "url":
-        compact_payload = "/".join(
-            quote_plus(value, safe="")
-            for value in (company_name, product_name, kg_text, epc)
-        )
-        qr_payload = f"{DEFAULT_QR_BASE_URL}{compact_payload}"
-        qr_input_mode = 2
-        qr_model = 2
-        qr_error_level = "M"
-        qr_data = qr_payload
-    elif qr_mode == "dataurl":
-        netto_text = f"NETTO: {kg_text} KG".upper()
-        plain_text = (
-            f"COMPANY: {company_name}\n"
-            f"MAHSULOT NOMI: {product_name}\n"
-            f"{netto_text}\n"
-            f"EPC: {epc}"
-        )
-        qr_payload = "data:text/plain;charset=utf-8," + quote(plain_text, safe="")
-        qr_input_mode = 3
-        qr_model = 2
-        qr_error_level = "M"
-        qr_data = f"{len(qr_payload.encode('utf-8')):04d}{qr_payload}"
-    else:
-        netto_text = f"NETTO: {kg_text} KG".upper()
-        qr_payload = "\n".join(
-            [
-                f"COMPANY: {company_name}",
-                f"MAHSULOT NOMI: {product_name}",
-                netto_text,
-                f"EPC: {epc}",
-            ]
-        )
-        qr_input_mode = 3
-        qr_model = 2
-        qr_error_level = "M"
-        qr_data = f"{len(qr_payload.encode('utf-8')):04d}{qr_payload}"
+    netto_text = f"NETTO: {kg_text} KG".upper()
+    qr_payload = encode_scan_payload(company_name, product_name, kg_text, brutto_text, epc)
 
     label_width_dots = mm_to_dots(label_width_mm, dpi)
     label_length_dots = mm_to_dots(label_length_mm, dpi)
@@ -330,38 +380,47 @@ def build_pack_label(
     gap_dots = mm_to_dots(3.0, dpi)
     line_step = mm_to_dots(5.0, dpi)
 
-    effective_qr_box_mm = qr_box_mm
-    qr_mul = 4
-    if qr_mode == "url":
-        effective_qr_box_mm = max(qr_box_mm, 16.0)
-        qr_mul = 4
-    elif qr_mode == "dataurl":
-        effective_qr_box_mm = max(qr_box_mm, 24.0)
-        qr_mul = 3
-    qr_box_dots = mm_to_dots(effective_qr_box_mm, dpi)
+    qr_box_dots = mm_to_dots(qr_box_mm, dpi)
     qr_right_gap_dots = mm_to_dots(6.0, dpi)
     base_qr_x = label_width_dots - qr_box_dots - qr_right_gap_dots
     qr_x = min(label_width_dots - qr_box_dots, max(left_x, base_qr_x))
 
-    product_width_dots = max(1, qr_x - left_x - gap_dots)
-    company_text, product_lines, product_indent_dots, netto_text, epc_text = measure_pack_text(
+    product_first_line_width_dots = max(
+        1,
+        label_width_dots - left_x,
+    )
+    product_rest_line_width_dots = max(
+        1,
+        qr_x - left_x - mm_to_dots(5.0, dpi),
+    )
+    company_text, product_lines, netto_text, brutto_text, epc_text = measure_pack_text(
         company_name,
         product_name,
         kg_text,
+        brutto_text,
         epc,
-        product_width_dots,
+        product_first_line_width_dots,
+        product_rest_line_width_dots,
     )
 
     company_y = safe_margin_dots + (line_step * 2)
     item_y = company_y + line_step
-    qty_y = item_y + (len(product_lines) * line_step)
+    qty_y = mm_to_dots(33.0, dpi)
     qr_y = max(safe_margin_dots + line_step * 2, qty_y + line_step)
     qr_y = min(
         label_length_dots - safe_margin_dots - mm_to_dots(18.0, dpi),
         qr_y + mm_to_dots(8.0, dpi),
     )
-    epc_y = max(0, safe_margin_dots - (line_step * 3))
-    barcode_y = epc_y + line_step
+    epc_y = max(0, safe_margin_dots - (line_step * 5))
+    text_block_up_dots = mm_to_dots(3.0, dpi)
+    header_block_up_dots = mm_to_dots(5.0, dpi)
+    company_y = max(0, company_y - header_block_up_dots)
+    item_y = max(0, item_y - header_block_up_dots)
+    qty_y = max(0, qty_y - text_block_up_dots)
+    brutto_y = max(0, qty_y + line_step)
+    barcode_y = max(0, epc_y + mm_to_dots(3.0, dpi))
+    barcode_x = max(0, left_x - mm_to_dots(2.0, dpi))
+    qr_graphic_bytes = render_qr_graphic(qr_payload, qr_box_dots)
 
     graphic_bytes = render_text_graphic(
         label_width_dots,
@@ -370,11 +429,12 @@ def build_pack_label(
         company_y,
         item_y,
         qty_y,
+        brutto_y,
         epc_y,
         company_text,
         product_lines,
-        product_indent_dots,
         netto_text,
+        brutto_text,
         epc_text,
     )
 
@@ -391,12 +451,11 @@ def build_pack_label(
         "^P1",
         "^L",
         f"Y0,0,{TEXT_GRAPHIC_NAME}",
-        f"BA,{left_x},{barcode_y},1,2,42,0,0,{epc}",
-        f"W{qr_x},{qr_y},{qr_input_mode},{qr_model},{qr_error_level},8,{qr_mul},{len(qr_data.encode('utf-8'))},0",
-        qr_data,
+        f"BA,{barcode_x},{barcode_y},1,2,42,0,0,{epc}",
+        f"Y{qr_x},{qr_y},{QR_GRAPHIC_NAME}",
         "E",
     ]
-    return commands, graphic_bytes
+    return commands, graphic_bytes, qr_graphic_bytes
 
 
 def download_graphic(dev, ep_out, ep_in, name: str, graphic_bytes: bytes) -> None:
@@ -416,6 +475,7 @@ def print_pack(
     company_name: str,
     product_name: str,
     kg_text: str,
+    brutto_text: str,
     epc: str,
     label_length_mm: int,
     label_gap_mm: int,
@@ -425,10 +485,11 @@ def print_pack(
     qr_box_mm: float,
     qr_mode: str,
 ) -> str | None:
-    commands, graphic_bytes = build_pack_label(
+    commands, graphic_bytes, qr_graphic_bytes = build_pack_label(
         company_name,
         product_name,
         kg_text,
+        brutto_text,
         epc,
         label_length_mm,
         label_gap_mm,
@@ -440,6 +501,7 @@ def print_pack(
     )
 
     download_graphic(dev, ep_out, ep_in, TEXT_GRAPHIC_NAME, graphic_bytes)
+    download_graphic(dev, ep_out, ep_in, QR_GRAPHIC_NAME, qr_graphic_bytes)
 
     for command in commands:
         send(dev, ep_out, ep_in, command)
@@ -469,6 +531,7 @@ def main() -> int:
         args.company_name,
         args.product_name,
         args.kg,
+        "5",
         args.epc,
         args.label_length_mm,
         args.label_gap_mm,

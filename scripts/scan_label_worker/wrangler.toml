@@ -1,0 +1,7 @@
+name = "scan-label"
+main = "worker.js"
+compatibility_date = "2026-04-29"
+
+routes = [
+  { pattern = "scan.wspace.sbs/*", zone_name = "wspace.sbs" }
+]
