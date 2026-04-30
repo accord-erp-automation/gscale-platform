@@ -41,7 +41,9 @@ func BuildPackLabel(input PackLabel, options LabelOptions) (PackLabelData, error
 	lineStep := MMDots(5.0, options.DPI)
 
 	qrBoxDots := MMDots(options.QRBoxMM, options.DPI)
-	qrRightGapDots := MMDots(6.0, options.DPI)
+	// QR'ni biroz o'ngroqqa surish uchun o'ngdagi xavfsiz bo'shliqni
+	// 6mm dan 4mm ga tushiramiz, lekin label chetidan ham chiqarmaymiz.
+	qrRightGapDots := MMDots(4.0, options.DPI)
 	baseQRX := labelWidthDots - qrBoxDots - qrRightGapDots
 	qrX := minInt(labelWidthDots-qrBoxDots, maxInt(leftX, baseQRX))
 
