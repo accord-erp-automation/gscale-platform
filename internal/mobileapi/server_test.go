@@ -790,7 +790,7 @@ func TestBatchStartPropagatesPrintMode(t *testing.T) {
 		}
 	}()
 
-	startReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea","warehouse":"Stores - A","print_mode":"label","printer":"g500","tare_enabled":true,"tare_kg":0.78}`))
+	startReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea","warehouse":"Stores - A","print_mode":"label","printer":"g500","quantity_source":"manual","manual_qty_kg":5,"tare_enabled":true,"tare_kg":0.78}`))
 	startRec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(startRec, startReq)
 
@@ -811,6 +811,9 @@ func TestBatchStartPropagatesPrintMode(t *testing.T) {
 	if !runner.lastSelection.TareEnabled || runner.lastSelection.TareKG != 0.78 {
 		t.Fatalf("runner tare = enabled:%v kg:%v", runner.lastSelection.TareEnabled, runner.lastSelection.TareKG)
 	}
+	if runner.lastSelection.QuantitySource != workflow.QuantitySourceManual || runner.lastSelection.ManualQtyKG != 5 {
+		t.Fatalf("runner quantity source = %q manual=%v", runner.lastSelection.QuantitySource, runner.lastSelection.ManualQtyKG)
+	}
 
 	snap, err := store.Read()
 	if err != nil {
@@ -824,6 +827,9 @@ func TestBatchStartPropagatesPrintMode(t *testing.T) {
 	}
 	if !snap.Batch.Tare || snap.Batch.TareKG != 0.78 {
 		t.Fatalf("batch tare = enabled:%v kg:%v", snap.Batch.Tare, snap.Batch.TareKG)
+	}
+	if snap.Batch.QuantitySource != workflow.QuantitySourceManual || snap.Batch.ManualQtyKG != 5 {
+		t.Fatalf("batch quantity source = %q manual=%v", snap.Batch.QuantitySource, snap.Batch.ManualQtyKG)
 	}
 
 	stopReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/stop", nil)

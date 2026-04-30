@@ -48,13 +48,15 @@ type setupWarehouseRequest struct {
 }
 
 type batchStartRequest struct {
-	ItemCode    string  `json:"item_code"`
-	ItemName    string  `json:"item_name"`
-	Warehouse   string  `json:"warehouse"`
-	PrintMode   string  `json:"print_mode"`
-	Printer     string  `json:"printer"`
-	TareEnabled bool    `json:"tare_enabled"`
-	TareKG      float64 `json:"tare_kg"`
+	ItemCode       string  `json:"item_code"`
+	ItemName       string  `json:"item_name"`
+	Warehouse      string  `json:"warehouse"`
+	PrintMode      string  `json:"print_mode"`
+	Printer        string  `json:"printer"`
+	QuantitySource string  `json:"quantity_source"`
+	ManualQtyKG    float64 `json:"manual_qty_kg"`
+	TareEnabled    bool    `json:"tare_enabled"`
+	TareKG         float64 `json:"tare_kg"`
 }
 
 type Server struct {
@@ -615,13 +617,15 @@ func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	selection := workflow.Selection{
-		ItemCode:    strings.TrimSpace(req.ItemCode),
-		ItemName:    strings.TrimSpace(req.ItemName),
-		Warehouse:   strings.TrimSpace(req.Warehouse),
-		PrintMode:   normalizePrintMode(req.PrintMode),
-		Printer:     normalizePrinter(req.Printer),
-		TareEnabled: req.TareEnabled,
-		TareKG:      req.TareKG,
+		ItemCode:       strings.TrimSpace(req.ItemCode),
+		ItemName:       strings.TrimSpace(req.ItemName),
+		Warehouse:      strings.TrimSpace(req.Warehouse),
+		PrintMode:      normalizePrintMode(req.PrintMode),
+		Printer:        normalizePrinter(req.Printer),
+		QuantitySource: req.QuantitySource,
+		ManualQtyKG:    req.ManualQtyKG,
+		TareEnabled:    req.TareEnabled,
+		TareKG:         req.TareKG,
 	}.Normalize()
 	if selection.ItemCode == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "item_code_and_warehouse_required"})
@@ -636,6 +640,10 @@ func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
 	}
 	if selection.Warehouse == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "item_code_and_warehouse_required"})
+		return
+	}
+	if selection.UsesManualQty() && selection.ManualQtyKG <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "manual_qty_required"})
 		return
 	}
 	if !s.cfg.CanRunBatchActions() {
@@ -725,6 +733,8 @@ func (s *Server) persistBatchProgress(progress workflow.Progress) {
 		snapshot.Batch.Warehouse = progress.Selection.Warehouse
 		snapshot.Batch.PrintMode = progress.Selection.PrintMode
 		snapshot.Batch.Printer = normalizePrinter(progress.Selection.Printer)
+		snapshot.Batch.QuantitySource = progress.Selection.QuantitySource
+		snapshot.Batch.ManualQtyKG = progress.Selection.ManualQtyKG
 		snapshot.Batch.Tare = progress.Selection.TareEnabled
 		snapshot.Batch.TareKG = progress.Selection.TareKG
 		snapshot.Batch.TotalQty = progress.TotalQty
@@ -750,6 +760,14 @@ func (s *Server) persistBatchProgress(progress workflow.Progress) {
 		time.Now().UTC(),
 	); err != nil {
 		log.Printf("archive print record error: %v", err)
+	}
+	if progress.Selection.UsesManualQty() {
+		if err := s.archive.CloseSession(time.Now().UTC()); err != nil {
+			log.Printf("archive manual close error: %v", err)
+		}
+		s.mu.Lock()
+		s.archiveLastDraftCount = 0
+		s.mu.Unlock()
 	}
 }
 

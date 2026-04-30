@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const maxDuplicateBarcodeRetries = 5
@@ -38,24 +39,35 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 	draftCount := 0
 	lastSuccess := LastSuccess{}
 	totalQty := 0.0
+	manualMode := selection.UsesManualQty()
 
 	for {
-		reading, err := r.qtyReader.WaitStablePositiveReading(ctx, r.options.StableReadTimeout, r.options.StableReadPollInterval)
-		if isContextError(err) {
-			return nil
-		}
-		if err != nil {
-			if isTimeoutError(err) {
+		var reading StableReading
+		if manualMode {
+			reading = StableReading{
+				Qty:       selection.ManualQtyKG,
+				Unit:      "kg",
+				UpdatedAt: time.Now().UTC(),
+			}
+		} else {
+			var err error
+			reading, err = r.qtyReader.WaitStablePositiveReading(ctx, r.options.StableReadTimeout, r.options.StableReadPollInterval)
+			if isContextError(err) {
+				return nil
+			}
+			if err != nil {
+				if isTimeoutError(err) {
+					continue
+				}
+				r.reportProgress(hooks, Progress{
+					Selection:   selection,
+					DraftCount:  draftCount,
+					LastSuccess: lastSuccess,
+					TotalQty:    totalQty,
+					Note:        "Scale xato: " + err.Error(),
+				})
 				continue
 			}
-			r.reportProgress(hooks, Progress{
-				Selection:   selection,
-				DraftCount:  draftCount,
-				LastSuccess: lastSuccess,
-				TotalQty:    totalQty,
-				Note:        "Scale xato: " + err.Error(),
-			})
-			continue
 		}
 
 		r.logf(
@@ -81,6 +93,9 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				TotalQty:    totalQty,
 				Note:        fmt.Sprintf("QTY juda kichik: %.3f kg | min %.3f kg", reading.Qty, minBatchQtyKg),
 			})
+			if manualMode {
+				return nil
+			}
 			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
 				return nil
 			}
@@ -104,6 +119,9 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				TotalQty:    totalQty,
 				Note:        fmt.Sprintf("NETTO juda kichik: brutto %.3f kg - babina %.3f kg = %.3f kg | min %.3f kg", reading.Qty, selection.TareKG, netQty, minBatchQtyKg),
 			})
+			if manualMode {
+				return nil
+			}
 			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
 				return nil
 			}
@@ -133,6 +151,9 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				TotalQty:    totalQty,
 				Note:        "ERP xato: " + err.Error(),
 			})
+			if manualMode {
+				return nil
+			}
 			continue
 		}
 
@@ -165,6 +186,9 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				TotalQty:    totalQty,
 				Note:        note,
 			})
+			if manualMode {
+				return nil
+			}
 			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
 				return nil
 			}
@@ -195,6 +219,9 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				TotalQty:    totalQty,
 				Note:        note,
 			})
+			if manualMode {
+				return nil
+			}
 			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
 				return nil
 			}
@@ -212,6 +239,9 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				TotalQty:    totalQty,
 				Note:        "Submit xato: " + err.Error(),
 			})
+			if manualMode {
+				return nil
+			}
 			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
 				return nil
 			}
@@ -238,6 +268,9 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 			TotalQty:    totalQty,
 			Note:        fmt.Sprintf("Batch davom etmoqda | Jami %.3f kg", totalQty),
 		})
+		if manualMode {
+			return nil
+		}
 
 		for {
 			err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, draft.Qty)

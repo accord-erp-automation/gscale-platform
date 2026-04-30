@@ -34,17 +34,19 @@ type ZebraSnapshot struct {
 }
 
 type BatchSnapshot struct {
-	Active    bool    `json:"active"`
-	ChatID    int64   `json:"chat_id,omitempty"`
-	ItemCode  string  `json:"item_code,omitempty"`
-	ItemName  string  `json:"item_name,omitempty"`
-	Warehouse string  `json:"warehouse,omitempty"`
-	PrintMode string  `json:"print_mode,omitempty"`
-	Printer   string  `json:"printer,omitempty"`
-	Tare      bool    `json:"tare,omitempty"`
-	TareKG    float64 `json:"tare_kg,omitempty"`
-	TotalQty  float64 `json:"total_qty,omitempty"`
-	UpdatedAt string  `json:"updated_at,omitempty"`
+	Active         bool    `json:"active"`
+	ChatID         int64   `json:"chat_id,omitempty"`
+	ItemCode       string  `json:"item_code,omitempty"`
+	ItemName       string  `json:"item_name,omitempty"`
+	Warehouse      string  `json:"warehouse,omitempty"`
+	PrintMode      string  `json:"print_mode,omitempty"`
+	Printer        string  `json:"printer,omitempty"`
+	QuantitySource string  `json:"quantity_source,omitempty"`
+	ManualQtyKG    float64 `json:"manual_qty_kg,omitempty"`
+	Tare           bool    `json:"tare,omitempty"`
+	TareKG         float64 `json:"tare_kg,omitempty"`
+	TotalQty       float64 `json:"total_qty,omitempty"`
+	UpdatedAt      string  `json:"updated_at,omitempty"`
 }
 
 type PrintRequestSnapshot struct {

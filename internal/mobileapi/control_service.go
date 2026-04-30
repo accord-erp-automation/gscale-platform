@@ -116,12 +116,16 @@ func (w bridgeBatchStateWriter) Set(active bool, ownerID int64, selection workfl
 			snapshot.Batch.Warehouse = selection.Warehouse
 			snapshot.Batch.PrintMode = selection.PrintMode
 			snapshot.Batch.Printer = normalizePrinter(selection.Printer)
+			snapshot.Batch.QuantitySource = selection.QuantitySource
+			snapshot.Batch.ManualQtyKG = selection.ManualQtyKG
 			snapshot.Batch.Tare = selection.TareEnabled
 			snapshot.Batch.TareKG = selection.TareKG
 			snapshot.Batch.TotalQty = 0
 		} else {
 			snapshot.Batch.PrintMode = ""
 			snapshot.Batch.Printer = ""
+			snapshot.Batch.QuantitySource = ""
+			snapshot.Batch.ManualQtyKG = 0
 			snapshot.Batch.Tare = false
 			snapshot.Batch.TareKG = 0
 			snapshot.PrintRequest = bridgestate.PrintRequestSnapshot{}

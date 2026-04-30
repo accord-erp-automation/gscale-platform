@@ -7,13 +7,15 @@ import (
 )
 
 type Selection struct {
-	ItemCode    string
-	ItemName    string
-	Warehouse   string
-	PrintMode   string
-	Printer     string
-	TareEnabled bool
-	TareKG      float64
+	ItemCode       string
+	ItemName       string
+	Warehouse      string
+	PrintMode      string
+	Printer        string
+	QuantitySource string
+	ManualQtyKG    float64
+	TareEnabled    bool
+	TareKG         float64
 }
 
 func (s Selection) Normalize() Selection {
@@ -22,6 +24,10 @@ func (s Selection) Normalize() Selection {
 	s.Warehouse = strings.TrimSpace(s.Warehouse)
 	s.PrintMode = normalizePrintMode(s.PrintMode)
 	s.Printer = strings.ToLower(strings.TrimSpace(s.Printer))
+	s.QuantitySource = normalizeQuantitySource(s.QuantitySource)
+	if s.QuantitySource != QuantitySourceManual || s.ManualQtyKG <= 0 {
+		s.ManualQtyKG = 0
+	}
 	if !s.TareEnabled || s.TareKG <= 0 {
 		s.TareEnabled = false
 		s.TareKG = 0
@@ -30,6 +36,10 @@ func (s Selection) Normalize() Selection {
 		s.ItemName = s.ItemCode
 	}
 	return s
+}
+
+func (s Selection) UsesManualQty() bool {
+	return s.Normalize().QuantitySource == QuantitySourceManual
 }
 
 func (s Selection) NetQty(grossQty float64) float64 {
@@ -49,6 +59,11 @@ const (
 	PrintModeLabelOnly = "label"
 )
 
+const (
+	QuantitySourceScale  = "scale"
+	QuantitySourceManual = "manual"
+)
+
 func normalizePrintMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", PrintModeRFID, "rfid-label", "rfid_label", "rfidprint":
@@ -57,6 +72,15 @@ func normalizePrintMode(mode string) string {
 		return PrintModeLabelOnly
 	default:
 		return PrintModeRFID
+	}
+}
+
+func normalizeQuantitySource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case QuantitySourceManual, "manual_kg", "manual-kg", "kg":
+		return QuantitySourceManual
+	default:
+		return QuantitySourceScale
 	}
 }
 

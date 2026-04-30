@@ -233,6 +233,66 @@ func TestMaterialReceiptRunnerRunWithTareUsesNetQtyAndPrintGrossQty(t *testing.T
 	}
 }
 
+func TestMaterialReceiptRunnerManualQtyPrintsOnceWithoutScaleCycle(t *testing.T) {
+	t.Parallel()
+
+	reader := &stubQtyReader{
+		printResults: []printRequestResultResult{
+			{
+				result: PrintRequestResult{
+					EPC:    "EPC-MANUAL",
+					Status: "done",
+				},
+			},
+		},
+	}
+	erpClient := &stubERP{}
+	printWriter := &stubPrintRequestWriter{}
+	history := &stubHistory{}
+
+	runner := NewMaterialReceiptRunner(MaterialReceiptDependencies{
+		QtyReader:     reader,
+		ERP:           erpClient,
+		PrintRequests: printWriter,
+		EPCGenerator:  &stubGenerator{epcs: []string{"EPC-MANUAL"}},
+		History:       history,
+	})
+
+	err := runner.Run(context.Background(), Selection{
+		ItemCode:       "ITEM-1",
+		ItemName:       "Tea",
+		Warehouse:      "Stores - A",
+		QuantitySource: QuantitySourceManual,
+		ManualQtyKG:    5,
+		TareEnabled:    true,
+		TareKG:         0.78,
+	}, Hooks{})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if reader.stableIdx != 0 {
+		t.Fatalf("manual mode should not read scale, stable reads = %d", reader.stableIdx)
+	}
+	if reader.nextCycleIdx != 0 {
+		t.Fatalf("manual mode should not wait for next cycle, calls = %d", reader.nextCycleIdx)
+	}
+	if len(erpClient.createInputs) != 1 {
+		t.Fatalf("create inputs = %d", len(erpClient.createInputs))
+	}
+	if got := erpClient.createInputs[0].Qty; fmt.Sprintf("%.2f", got) != "4.22" {
+		t.Fatalf("erp qty = %.3f, want 4.220", got)
+	}
+	if len(printWriter.setCalls) != 1 {
+		t.Fatalf("setCalls = %d", len(printWriter.setCalls))
+	}
+	if got := printWriter.setCalls[0].grossQty; got != 5 {
+		t.Fatalf("print gross qty = %.3f, want 5.000", got)
+	}
+	if !slices.Equal(history.items, []string{"EPC-MANUAL"}) {
+		t.Fatalf("history = %#v", history.items)
+	}
+}
+
 func TestMaterialReceiptRunnerDeletesDraftOnPrintFailure(t *testing.T) {
 	t.Parallel()
 
