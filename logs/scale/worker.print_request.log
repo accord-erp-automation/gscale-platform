@@ -1,0 +1,4 @@
+[worker.print_request] 2026/04/30 12:34:17.186357 request queued: epc=30AB228AB5676D70587CF039 item=zizi yeryongoq qty=5.438 kg -> godex label print
+[worker.print_request] 2026/04/30 12:34:21.735830 request queued: epc=30AB228BC2704D40BDB5DE57 item=zizi yeryongoq qty=5.438 kg -> godex label print
+[worker.print_request] 2026/04/30 12:36:36.485215 request queued: epc=30AB22AB2159CD8C95B4586F item=zizi yeryongoq qty=2.231 kg -> godex label print
+[worker.print_request] 2026/04/30 12:36:41.036148 request queued: epc=30AB22AC0ECE03496C31AA65 item=zizi yeryongoq qty=2.231 kg -> godex label print

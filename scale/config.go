@@ -22,6 +22,9 @@ type appConfig struct {
 	zebraDevice     string
 	zebraInterval   time.Duration
 	disableZebra    bool
+	printBackend    string
+	godexCompany    string
+	godexBrutto     string
 	botDir          string
 	disableBot      bool
 	bridgeStateFile string
@@ -43,6 +46,9 @@ func parseFlags() (appConfig, error) {
 	flag.StringVar(&cfg.zebraDevice, "zebra-device", "", "zebra printer path, example /dev/usb/lp0")
 	flag.DurationVar(&cfg.zebraInterval, "zebra-interval", 900*time.Millisecond, "zebra monitor poll interval")
 	flag.BoolVar(&cfg.disableZebra, "no-zebra", false, "disable zebra monitor/actions")
+	flag.StringVar(&cfg.printBackend, "printer", printBackendZebra, "print backend: zebra or godex")
+	flag.StringVar(&cfg.godexCompany, "godex-company", "Accord", "company name printed on GoDEX pack labels")
+	flag.StringVar(&cfg.godexBrutto, "godex-brutto", "5kg", "brutto text printed on GoDEX pack labels")
 	flag.StringVar(&cfg.botDir, "bot-dir", "../bot", "telegram bot module directory")
 	flag.BoolVar(&cfg.disableBot, "no-bot", false, "disable auto-start telegram bot")
 	flag.StringVar(&cfg.bridgeStateFile, "bridge-state-file", defaultSharedBridgeStateFile, "shared bridge JSON file for scale+zebra+bot")
@@ -53,6 +59,9 @@ func parseFlags() (appConfig, error) {
 		return appConfig{}, err
 	}
 	cfg.bauds = bauds
+	cfg.printBackend = normalizePrintBackend(cfg.printBackend)
+	cfg.godexCompany = strings.TrimSpace(cfg.godexCompany)
+	cfg.godexBrutto = strings.TrimSpace(cfg.godexBrutto)
 
 	return cfg, nil
 }

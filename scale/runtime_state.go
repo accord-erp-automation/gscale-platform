@@ -13,6 +13,9 @@ type runtimeState struct {
 	updates               <-chan Reading
 	zebraUpdates          <-chan ZebraStatus
 	zebraPreferred        string
+	printBackend          string
+	godexCompany          string
+	godexBrutto           string
 	bridgeStore           *bridgestate.Store
 	batchState            *batchStateReader
 	printRequest          *printRequestReader
@@ -26,19 +29,23 @@ type runtimeState struct {
 	zebraEnabled          bool
 }
 
-func newRuntimeState(ctx context.Context, updates <-chan Reading, zebraUpdates <-chan ZebraStatus, zebraPreferred string, bridgeStateFile string, autoWhenNoBatch bool, serialErr error) *runtimeState {
+func newRuntimeState(ctx context.Context, updates <-chan Reading, zebraUpdates <-chan ZebraStatus, zebraPreferred string, bridgeStateFile string, autoWhenNoBatch bool, serialErr error, printBackend string, godexCompany string, godexBrutto string) *runtimeState {
 	rs := &runtimeState{
-		ctx:          ctx,
-		updates:      updates,
-		zebraUpdates: zebraUpdates,
-		bridgeStore:  bridgestate.New(bridgeStateFile),
-		batchState:   newBatchStateReader(bridgeStateFile, autoWhenNoBatch),
-		printRequest: newPrintRequestReader(bridgeStateFile),
-		batchActive:  true,
-		last:         Reading{Unit: "kg"},
-		message:      "scale oqimi kutilmoqda",
-		info:         "ready",
-		now:          time.Now(),
+		ctx:            ctx,
+		updates:        updates,
+		zebraUpdates:   zebraUpdates,
+		zebraPreferred: strings.TrimSpace(zebraPreferred),
+		printBackend:   normalizePrintBackend(printBackend),
+		godexCompany:   strings.TrimSpace(godexCompany),
+		godexBrutto:    strings.TrimSpace(godexBrutto),
+		bridgeStore:    bridgestate.New(bridgeStateFile),
+		batchState:     newBatchStateReader(bridgeStateFile, autoWhenNoBatch),
+		printRequest:   newPrintRequestReader(bridgeStateFile),
+		batchActive:    true,
+		last:           Reading{Unit: "kg"},
+		message:        "scale oqimi kutilmoqda",
+		info:           "ready",
+		now:            time.Now(),
 		zebra: ZebraStatus{
 			Connected: false,
 			Verify:    "-",
@@ -47,6 +54,12 @@ func newRuntimeState(ctx context.Context, updates <-chan Reading, zebraUpdates <
 			UpdatedAt: time.Now(),
 		},
 		zebraEnabled: zebraUpdates != nil,
+	}
+	if rs.godexCompany == "" {
+		rs.godexCompany = "Accord"
+	}
+	if rs.godexBrutto == "" {
+		rs.godexBrutto = "5kg"
 	}
 	if rs.batchState != nil {
 		rs.batchActive = rs.batchState.Active(time.Now())
@@ -138,7 +151,14 @@ func (rs *runtimeState) processPendingPrintRequest(now time.Time) {
 		itemLabel = strings.TrimSpace(req.ItemCode)
 	}
 
-	switch decidePendingPrintRequest(req, rs.zebra, rs.activePrintRequestEPC, rs.zebraEnabled, rs.last) {
+	mode := normalizePrintRequestMode(req.Mode)
+	printer := resolvePrintBackend(req.Printer, rs.printBackend)
+	weightLabels := formatPrintWeightLabels(req)
+	zebraForDecision := rs.zebra
+	if printer != printBackendZebra {
+		zebraForDecision = ZebraStatus{}
+	}
+	switch decidePendingPrintRequest(req, zebraForDecision, rs.activePrintRequestEPC, rs.printBackendEnabled(printer), rs.last) {
 	case printRequestMarkDone:
 		lg.Printf("request already satisfied: epc=%s item=%s qty=%s", epc, itemLabel, qtyText)
 		if err := writePrintRequestStatus(rs.bridgeStore, epc, "done", ""); err != nil {
@@ -147,16 +167,85 @@ func (rs *runtimeState) processPendingPrintRequest(now time.Time) {
 		}
 		rs.info = "print request already satisfied: epc=" + epc
 	case printRequestErrorDisabled:
-		lg.Printf("request blocked: zebra disabled epc=%s item=%s qty=%s", epc, itemLabel, qtyText)
-		if err := writePrintRequestStatus(rs.bridgeStore, epc, "error", "zebra disabled"); err != nil {
+		errText := printer + " disabled"
+		lg.Printf("request blocked: %s epc=%s item=%s qty=%s", errText, epc, itemLabel, qtyText)
+		if err := writePrintRequestStatus(rs.bridgeStore, epc, "error", errText); err != nil {
 			rs.info = "print request status xato: " + err.Error()
 			return
 		}
-		rs.info = "print request xato: zebra disabled"
+		rs.info = "print request xato: " + errText
 	case printRequestExternalExec:
 		lg.Printf("request delegated: polygon fake zebra will handle epc=%s item=%s qty=%s", epc, itemLabel, qtyText)
 		rs.info = "print request delegated to polygon: epc=" + epc
 	case printRequestExecute:
+		if printer == printBackendGoDEX {
+			lg.Printf("request queued: epc=%s item=%s qty=%s -> godex label print", epc, itemLabel, qtyText)
+			if err := writePrintRequestStatus(rs.bridgeStore, epc, "processing", ""); err != nil {
+				rs.info = "print request status xato: " + err.Error()
+				return
+			}
+			rs.activePrintRequestEPC = epc
+			defer func() {
+				rs.activePrintRequestEPC = ""
+			}()
+			rs.info = "bridge print request queued: epc=" + epc + " (godex)"
+
+			godexWeights := formatGoDEXWeightLabels(req, rs.godexBrutto)
+			st := runGoDEXPackLabel(rs.godexCompany, godexWeights.Brutto, epc, godexWeights.Netto, req.ItemName, 5*time.Second)
+			st.UpdatedAt = time.Now()
+			rs.applyZebra(st)
+
+			status := "done"
+			errText := ""
+			if strings.TrimSpace(st.Error) != "" {
+				status = "error"
+				errText = st.Error
+			}
+			if err := writePrintRequestStatus(rs.bridgeStore, epc, status, errText); err != nil {
+				rs.info = "print request status xato: " + err.Error()
+				return
+			}
+			if status == "done" {
+				rs.info = "print request godex done: epc=" + epc
+			} else {
+				rs.info = "print request xato: " + errText
+			}
+			return
+		}
+
+		if mode == printRequestModeLabelOnly {
+			lg.Printf("request queued: epc=%s item=%s qty=%s -> label-only print", epc, itemLabel, qtyText)
+			if err := writePrintRequestStatus(rs.bridgeStore, epc, "processing", ""); err != nil {
+				rs.info = "print request status xato: " + err.Error()
+				return
+			}
+			rs.activePrintRequestEPC = epc
+			defer func() {
+				rs.activePrintRequestEPC = ""
+			}()
+			rs.info = "bridge print request queued: epc=" + epc + " (label-only)"
+
+			st := runZebraLabelOnlyPrint(rs.zebraPreferred, epc, weightLabels.Netto, weightLabels.Brutto, req.ItemName, 1200*time.Millisecond)
+			st.UpdatedAt = time.Now()
+			rs.applyZebra(st)
+
+			status := "done"
+			errText := ""
+			if strings.TrimSpace(st.Error) != "" {
+				status = "error"
+				errText = st.Error
+			}
+			if err := writePrintRequestStatus(rs.bridgeStore, epc, status, errText); err != nil {
+				rs.info = "print request status xato: " + err.Error()
+				return
+			}
+			if status == "done" {
+				rs.info = "print request label-only done: epc=" + epc
+			} else {
+				rs.info = "print request xato: " + errText
+			}
+			return
+		}
 		lg.Printf("request queued: epc=%s item=%s qty=%s -> fake zebra encode", epc, itemLabel, qtyText)
 		if err := writePrintRequestStatus(rs.bridgeStore, epc, "processing", ""); err != nil {
 			rs.info = "print request status xato: " + err.Error()
@@ -164,7 +253,7 @@ func (rs *runtimeState) processPendingPrintRequest(now time.Time) {
 		}
 		rs.activePrintRequestEPC = epc
 		rs.info = "bridge print request queued: epc=" + epc
-		st := runZebraEncodeAndRead(rs.zebraPreferred, epc, formatLabelQty(req.Qty, req.Unit), req.ItemName, 1400*time.Millisecond)
+		st := runZebraEncodeAndRead(rs.zebraPreferred, epc, weightLabels.Netto, weightLabels.Brutto, req.ItemName, 1400*time.Millisecond)
 		st.UpdatedAt = time.Now()
 		rs.applyZebra(st)
 	default:
@@ -172,8 +261,32 @@ func (rs *runtimeState) processPendingPrintRequest(now time.Time) {
 	}
 }
 
+func (rs *runtimeState) printBackendEnabled(printer string) bool {
+	if rs == nil {
+		return false
+	}
+	if normalizePrintBackend(printer) == printBackendGoDEX {
+		return true
+	}
+	return rs.zebraEnabled
+}
+
 func mergeZebraStatus(prev ZebraStatus, incoming ZebraStatus) ZebraStatus {
 	st := incoming
+	if strings.TrimSpace(st.Action) == "" {
+		if isBlankZebraValue(st.DeviceState) && !isBlankZebraValue(prev.DeviceState) {
+			st.DeviceState = prev.DeviceState
+		}
+		if isBlankZebraValue(st.MediaState) && !isBlankZebraValue(prev.MediaState) {
+			st.MediaState = prev.MediaState
+		}
+		if isBlankZebraValue(st.ReadLine1) && !isBlankZebraValue(prev.ReadLine1) {
+			st.ReadLine1 = prev.ReadLine1
+		}
+		if isBlankZebraValue(st.ReadLine2) && !isBlankZebraValue(prev.ReadLine2) {
+			st.ReadLine2 = prev.ReadLine2
+		}
+	}
 	if strings.TrimSpace(st.LastEPC) == "" && strings.TrimSpace(prev.LastEPC) != "" {
 		st.LastEPC = prev.LastEPC
 		if strings.TrimSpace(st.Verify) == "" || strings.TrimSpace(st.Verify) == "-" {
@@ -188,6 +301,11 @@ func mergeZebraStatus(prev ZebraStatus, incoming ZebraStatus) ZebraStatus {
 		st.UpdatedAt = time.Now()
 	}
 	return st
+}
+
+func isBlankZebraValue(v string) bool {
+	v = strings.TrimSpace(v)
+	return v == "" || v == "-"
 }
 
 func zebraActionSummary(st ZebraStatus) string {

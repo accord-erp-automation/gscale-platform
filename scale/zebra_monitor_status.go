@@ -49,10 +49,7 @@ func startZebraMonitor(ctx context.Context, preferredDevice string, interval tim
 	}()
 }
 
-func collectZebraStatus(preferredDevice string, timeout time.Duration) ZebraStatus {
-	zebraIOMutex.Lock()
-	defer zebraIOMutex.Unlock()
-
+func collectZebraStatus(preferredDevice string, _ time.Duration) ZebraStatus {
 	st := ZebraStatus{
 		Connected: false,
 		Verify:    "-",
@@ -68,8 +65,8 @@ func collectZebraStatus(preferredDevice string, timeout time.Duration) ZebraStat
 	st.Connected = true
 	st.DevicePath = p.DevicePath
 	st.Name = p.DisplayName()
-	st.DeviceState = safeText("-", queryVarRetry(p.DevicePath, "device.status", timeout, 3, 90*time.Millisecond))
-	st.MediaState = safeText("-", queryVarRetry(p.DevicePath, "media.status", timeout, 3, 90*time.Millisecond))
+	st.DeviceState = "-"
+	st.MediaState = "-"
 	st.ReadLine1 = "-"
 	st.ReadLine2 = "-"
 	st.Verify = "-"

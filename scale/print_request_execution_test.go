@@ -32,6 +32,11 @@ func TestDecidePendingPrintRequest(t *testing.T) {
 	if got := decidePendingPrintRequest(req, zebra, "", true, Reading{}); got != printRequestMarkDone {
 		t.Fatalf("matching epc should mark done: got=%s", got)
 	}
+
+	req.Mode = "label"
+	if got := decidePendingPrintRequest(req, zebra, "", true, Reading{}); got != printRequestExecute {
+		t.Fatalf("label-only mode should still execute: got=%s", got)
+	}
 }
 
 func TestWritePrintRequestStatus_UpdatesMatchingEPCOnly(t *testing.T) {
@@ -68,5 +73,33 @@ func TestWritePrintRequestStatus_UpdatesMatchingEPCOnly(t *testing.T) {
 	}
 	if got.PrintRequest.Status != "done" {
 		t.Fatalf("status mismatch: %q", got.PrintRequest.Status)
+	}
+}
+
+func TestFormatPrintWeightLabels_WithTare(t *testing.T) {
+	net := 4.22
+	gross := 5.0
+	req := bridgestate.PrintRequestSnapshot{
+		Qty:      &net,
+		GrossQty: &gross,
+		Unit:     "kg",
+		Tare:     true,
+		TareKG:   0.78,
+	}
+
+	got := formatPrintWeightLabels(req)
+	if !got.HasTare {
+		t.Fatal("expected tare labels")
+	}
+	if got.Netto != "4.22 kg" {
+		t.Fatalf("netto mismatch: %q", got.Netto)
+	}
+	if got.Brutto != "5 kg" {
+		t.Fatalf("brutto mismatch: %q", got.Brutto)
+	}
+
+	godex := formatGoDEXWeightLabels(req, "5kg")
+	if godex.Netto != "4.22" || godex.Brutto != "5" {
+		t.Fatalf("godex labels mismatch: %+v", godex)
 	}
 }

@@ -124,7 +124,7 @@ func zebraSendRawUnlocked(device string, payload []byte) error {
 		return errors.New("zebra: payload bo'sh")
 	}
 
-	fd, err := syscall.Open(device, syscall.O_WRONLY|syscall.O_CLOEXEC, 0)
+	fd, err := syscall.Open(device, syscall.O_WRONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return fmt.Errorf("zebra: device ochilmadi: %w", err)
 	}

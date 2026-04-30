@@ -36,6 +36,7 @@ Bu `scale` va `bot` service'larini systemd'ga o'rnatadi, enable qiladi va start 
 - Aynan shu EPC allaqachon encode bo'lgan bo'lsa request `done` qilib yopiladi.
 - Zebra o'chirilgan bo'lsa request `error` holatiga o'tadi.
 - Encode ishlaganda request `processing` -> `done/error` oqimi bilan yuradi.
+- `print_request.mode = rfid` default; `print_request.mode = label` bo'lsa RFID yozish chetlab o'tiladi, label baribir bosiladi.
 
 ## Batch gate (`bridge_state.json`)
 
@@ -72,6 +73,9 @@ go run . --no-bot
 - `--zebra-device` (example: `/dev/usb/lp0`) - printer path
 - `--zebra-interval` (default: `900ms`) - Zebra monitor interval
 - `--no-zebra` - Zebra monitor va printer actionlarini o'chiradi
+- `--printer` (default: `zebra`) - print backend: `zebra` yoki `godex`
+- `--godex-company` (default: `Accord`) - GoDEX label company nomi
+- `--godex-brutto` (default: `5kg`) - GoDEX label brutto matni
 - `--bot-dir` (default: `../bot`) - bot modul yo'li
 - `--no-bot` - bot auto-startni o'chiradi
 - `--bridge-state-file` - shared snapshot fayli

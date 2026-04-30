@@ -48,9 +48,13 @@ type setupWarehouseRequest struct {
 }
 
 type batchStartRequest struct {
-	ItemCode  string `json:"item_code"`
-	ItemName  string `json:"item_name"`
-	Warehouse string `json:"warehouse"`
+	ItemCode    string  `json:"item_code"`
+	ItemName    string  `json:"item_name"`
+	Warehouse   string  `json:"warehouse"`
+	PrintMode   string  `json:"print_mode"`
+	Printer     string  `json:"printer"`
+	TareEnabled bool    `json:"tare_enabled"`
+	TareKG      float64 `json:"tare_kg"`
 }
 
 type Server struct {
@@ -380,8 +384,9 @@ func (s *Server) setupStatusPayload() map[string]any {
 	return map[string]any{
 		"ok":                           true,
 		"erp_write_configured":         s.cfg.HasERPWriteConfig(),
+		"erp_write_simulated":          s.cfg.DevERPWrite,
 		"erp_read_configured":          strings.TrimSpace(s.cfg.ERPReadURL) != "",
-		"batch_actions_ready":          s.cfg.HasERPWriteConfig(),
+		"batch_actions_ready":          s.cfg.CanRunBatchActions(),
 		"erp_url":                      strings.TrimSpace(s.cfg.ERPURL),
 		"erp_read_url":                 strings.TrimSpace(s.cfg.ERPReadURL),
 		"warehouse_mode":               normalizeWarehouseMode(s.cfg.WarehouseMode),
@@ -610,9 +615,13 @@ func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	selection := workflow.Selection{
-		ItemCode:  strings.TrimSpace(req.ItemCode),
-		ItemName:  strings.TrimSpace(req.ItemName),
-		Warehouse: strings.TrimSpace(req.Warehouse),
+		ItemCode:    strings.TrimSpace(req.ItemCode),
+		ItemName:    strings.TrimSpace(req.ItemName),
+		Warehouse:   strings.TrimSpace(req.Warehouse),
+		PrintMode:   normalizePrintMode(req.PrintMode),
+		Printer:     normalizePrinter(req.Printer),
+		TareEnabled: req.TareEnabled,
+		TareKG:      req.TareKG,
 	}.Normalize()
 	if selection.ItemCode == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "item_code_and_warehouse_required"})
@@ -629,7 +638,7 @@ func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "item_code_and_warehouse_required"})
 		return
 	}
-	if !s.cfg.HasERPWriteConfig() {
+	if !s.cfg.CanRunBatchActions() {
 		writeJSON(w, http.StatusPreconditionFailed, map[string]any{"error": "erp_not_configured"})
 		return
 	}
@@ -714,6 +723,10 @@ func (s *Server) persistBatchProgress(progress workflow.Progress) {
 		snapshot.Batch.ItemCode = progress.Selection.ItemCode
 		snapshot.Batch.ItemName = progress.Selection.ItemName
 		snapshot.Batch.Warehouse = progress.Selection.Warehouse
+		snapshot.Batch.PrintMode = progress.Selection.PrintMode
+		snapshot.Batch.Printer = normalizePrinter(progress.Selection.Printer)
+		snapshot.Batch.Tare = progress.Selection.TareEnabled
+		snapshot.Batch.TareKG = progress.Selection.TareKG
 		snapshot.Batch.TotalQty = progress.TotalQty
 	})
 

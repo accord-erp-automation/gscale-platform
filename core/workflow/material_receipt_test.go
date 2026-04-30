@@ -163,6 +163,76 @@ func TestMaterialReceiptRunnerRunSuccess(t *testing.T) {
 	}
 }
 
+func TestMaterialReceiptRunnerRunWithTareUsesNetQtyAndPrintGrossQty(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reader := &stubQtyReader{
+		stableReadings: []stableReadingResult{
+			{
+				reading: StableReading{
+					Qty:       5,
+					Unit:      "kg",
+					UpdatedAt: time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC),
+				},
+			},
+		},
+		printResults: []printRequestResultResult{
+			{
+				result: PrintRequestResult{
+					EPC:    "EPC-TARE",
+					Status: "done",
+				},
+			},
+		},
+		nextCycleErrs: []error{context.Canceled},
+		onNextCycle: func() {
+			cancel()
+		},
+	}
+	erpClient := &stubERP{}
+	printWriter := &stubPrintRequestWriter{}
+
+	runner := NewMaterialReceiptRunner(MaterialReceiptDependencies{
+		QtyReader:     reader,
+		ERP:           erpClient,
+		PrintRequests: printWriter,
+		EPCGenerator:  &stubGenerator{epcs: []string{"EPC-TARE"}},
+		History:       &stubHistory{},
+	})
+
+	err := runner.Run(ctx, Selection{
+		ItemCode:    "ITEM-1",
+		ItemName:    "Tea",
+		Warehouse:   "Stores - A",
+		TareEnabled: true,
+		TareKG:      0.78,
+	}, Hooks{})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if len(erpClient.createInputs) != 1 {
+		t.Fatalf("create inputs = %d", len(erpClient.createInputs))
+	}
+	if got := erpClient.createInputs[0].Qty; fmt.Sprintf("%.2f", got) != "4.22" {
+		t.Fatalf("erp qty = %.3f, want 4.220", got)
+	}
+	if len(printWriter.setCalls) != 1 {
+		t.Fatalf("setCalls = %d", len(printWriter.setCalls))
+	}
+	if got := printWriter.setCalls[0].qty; fmt.Sprintf("%.2f", got) != "4.22" {
+		t.Fatalf("print net qty = %.3f, want 4.220", got)
+	}
+	if got := printWriter.setCalls[0].grossQty; got != 5 {
+		t.Fatalf("print gross qty = %.3f, want 5.000", got)
+	}
+	if !printWriter.setCalls[0].selection.TareEnabled || printWriter.setCalls[0].selection.TareKG != 0.78 {
+		t.Fatalf("print selection tare = %+v", printWriter.setCalls[0].selection)
+	}
+}
+
 func TestMaterialReceiptRunnerDeletesDraftOnPrintFailure(t *testing.T) {
 	t.Parallel()
 
@@ -327,6 +397,7 @@ func (s *stubERP) DeleteStockEntryDraft(_ context.Context, name string) error {
 type printSetCall struct {
 	epc       string
 	qty       float64
+	grossQty  float64
 	unit      string
 	selection Selection
 }
@@ -336,10 +407,11 @@ type stubPrintRequestWriter struct {
 	clearCalls int
 }
 
-func (s *stubPrintRequestWriter) SetPrintRequest(epc string, qty float64, unit string, selection Selection) {
+func (s *stubPrintRequestWriter) SetPrintRequest(epc string, qty float64, grossQty float64, unit string, selection Selection) {
 	s.setCalls = append(s.setCalls, printSetCall{
 		epc:       epc,
 		qty:       qty,
+		grossQty:  grossQty,
 		unit:      unit,
 		selection: selection,
 	})
@@ -424,5 +496,52 @@ func TestRunSkipsTooSmallStableQty(t *testing.T) {
 	}
 	if len(history.items) != 0 {
 		t.Fatalf("history should stay empty: %#v", history.items)
+	}
+}
+
+func TestRunSkipsTooSmallNetQtyWithTare(t *testing.T) {
+	t.Parallel()
+
+	qtyReader := &stubQtyReader{
+		stableReadings: []stableReadingResult{
+			{reading: StableReading{Qty: 0.650, Unit: "kg"}},
+			{err: context.Canceled},
+		},
+		nextCycleErrs: []error{nil},
+	}
+	erp := &stubERP{}
+	printWriter := &stubPrintRequestWriter{}
+	progresses := make([]Progress, 0, 1)
+
+	runner := NewMaterialReceiptRunner(MaterialReceiptDependencies{
+		QtyReader:     qtyReader,
+		ERP:           erp,
+		PrintRequests: printWriter,
+		EPCGenerator:  &stubGenerator{epcs: []string{"EPC-001"}},
+		History:       &stubHistory{},
+	})
+
+	err := runner.Run(context.Background(), Selection{
+		ItemCode:    "ITEM-001",
+		ItemName:    "Green Tea",
+		Warehouse:   "Stores - A",
+		TareEnabled: true,
+		TareKG:      0.78,
+	}, Hooks{
+		Progress: func(progress Progress) {
+			progresses = append(progresses, progress)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if len(erp.createInputs) != 0 {
+		t.Fatalf("draft should not be created for too-small net qty: %#v", erp.createInputs)
+	}
+	if len(printWriter.setCalls) != 0 {
+		t.Fatalf("print request should not be created for too-small net qty: %#v", printWriter.setCalls)
+	}
+	if len(progresses) == 0 || !strings.Contains(progresses[0].Note, "NETTO juda kichik") {
+		t.Fatalf("expected net qty progress note, got %#v", progresses)
 	}
 }

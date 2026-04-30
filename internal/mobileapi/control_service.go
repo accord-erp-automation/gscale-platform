@@ -72,12 +72,17 @@ func (s *Server) applyWarehouseSetup(setup ERPSetup) {
 func (s *Server) newControlService() *batchcontrol.Service {
 	bridgeStore := bridgestate.New(s.cfg.BridgeStateFile)
 	erp := newERPClient(s.cfg)
+	workflowERP := workflow.ERP(erp)
+	if s.cfg.DevERPWrite {
+		log.Printf("mobileapi dev ERP write enabled: Stock Entry write calls are simulated")
+		workflowERP = newDevERPWriteClient()
+	}
 	return batchcontrol.New(batchcontrol.Dependencies{
 		Catalog:    erp,
 		BatchState: bridgeBatchStateWriter{store: bridgeStore},
 		Runner: workflow.NewMaterialReceiptRunner(workflow.MaterialReceiptDependencies{
 			QtyReader:               workflowBridgeClient{store: bridgeStore},
-			ERP:                     erp,
+			ERP:                     workflowERP,
 			PrintRequests:           bridgePrintRequestWriter{store: bridgeStore},
 			EPCGenerator:            corepkg.NewEPCGenerator(),
 			History:                 discardHistory{},
@@ -109,8 +114,16 @@ func (w bridgeBatchStateWriter) Set(active bool, ownerID int64, selection workfl
 			snapshot.Batch.ItemCode = selection.ItemCode
 			snapshot.Batch.ItemName = selection.ItemName
 			snapshot.Batch.Warehouse = selection.Warehouse
+			snapshot.Batch.PrintMode = selection.PrintMode
+			snapshot.Batch.Printer = normalizePrinter(selection.Printer)
+			snapshot.Batch.Tare = selection.TareEnabled
+			snapshot.Batch.TareKG = selection.TareKG
 			snapshot.Batch.TotalQty = 0
 		} else {
+			snapshot.Batch.PrintMode = ""
+			snapshot.Batch.Printer = ""
+			snapshot.Batch.Tare = false
+			snapshot.Batch.TareKG = 0
 			snapshot.PrintRequest = bridgestate.PrintRequestSnapshot{}
 		}
 		snapshot.Batch.UpdatedAt = at
@@ -121,7 +134,7 @@ type bridgePrintRequestWriter struct {
 	store *bridgestate.Store
 }
 
-func (w bridgePrintRequestWriter) SetPrintRequest(epc string, qty float64, unit string, selection workflow.Selection) {
+func (w bridgePrintRequestWriter) SetPrintRequest(epc string, qty float64, grossQty float64, unit string, selection workflow.Selection) {
 	if w.store == nil {
 		return
 	}
@@ -133,12 +146,18 @@ func (w bridgePrintRequestWriter) SetPrintRequest(epc string, qty float64, unit 
 	selection = selection.Normalize()
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	q := qty
+	gq := grossQty
 	_ = w.store.Update(func(snapshot *bridgestate.Snapshot) {
 		snapshot.PrintRequest.EPC = epc
 		snapshot.PrintRequest.Qty = &q
+		snapshot.PrintRequest.GrossQty = &gq
 		snapshot.PrintRequest.Unit = unit
 		snapshot.PrintRequest.ItemCode = selection.ItemCode
 		snapshot.PrintRequest.ItemName = selection.ItemName
+		snapshot.PrintRequest.Mode = selection.PrintMode
+		snapshot.PrintRequest.Printer = normalizePrinter(selection.Printer)
+		snapshot.PrintRequest.Tare = selection.TareEnabled
+		snapshot.PrintRequest.TareKG = selection.TareKG
 		snapshot.PrintRequest.Status = "pending"
 		snapshot.PrintRequest.Error = ""
 		snapshot.PrintRequest.RequestedAt = at

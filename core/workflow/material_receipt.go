@@ -86,6 +86,29 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 			}
 			continue
 		}
+		netQty := selection.NetQty(reading.Qty)
+		if netQty < minBatchQtyKg {
+			r.logf(
+				"batch net qty ignored: item=%s warehouse=%s gross=%.3f tare=%.3f net=%.3f below min=%.3f",
+				selection.ItemCode,
+				selection.Warehouse,
+				reading.Qty,
+				selection.TareKG,
+				netQty,
+				minBatchQtyKg,
+			)
+			r.reportProgress(hooks, Progress{
+				Selection:   selection,
+				DraftCount:  draftCount,
+				LastSuccess: lastSuccess,
+				TotalQty:    totalQty,
+				Note:        fmt.Sprintf("NETTO juda kichik: brutto %.3f kg - babina %.3f kg = %.3f kg | min %.3f kg", reading.Qty, selection.TareKG, netQty, minBatchQtyKg),
+			})
+			if err := r.qtyReader.WaitForNextCycle(ctx, r.options.NextCycleTimeout, r.options.NextCyclePollInterval, reading.Qty); isContextError(err) {
+				return nil
+			}
+			continue
+		}
 
 		epc, draft, err := createDraftWithFreshEPC(
 			func() string {
@@ -95,7 +118,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 				return r.erp.CreateMaterialReceiptDraft(ctx, CreateMaterialReceiptDraftInput{
 					ItemCode:  selection.ItemCode,
 					Warehouse: selection.Warehouse,
-					Qty:       reading.Qty,
+					Qty:       netQty,
 					Barcode:   epc,
 				})
 			},
@@ -114,7 +137,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 		}
 
 		r.logf("batch draft created: draft=%s qty=%.3f epc=%s", strings.TrimSpace(draft.Name), draft.Qty, epc)
-		r.printRequests.SetPrintRequest(epc, draft.Qty, reading.Unit, selection)
+		r.printRequests.SetPrintRequest(epc, draft.Qty, reading.Qty, reading.Unit, selection)
 		r.reportProgress(hooks, Progress{
 			Selection:   selection,
 			DraftCount:  draftCount,

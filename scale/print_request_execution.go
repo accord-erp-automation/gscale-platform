@@ -3,6 +3,7 @@ package main
 import (
 	bridgestate "bridge/state"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +18,11 @@ const (
 	printRequestExternalExec  printRequestDecision = "external_exec"
 )
 
+const (
+	printRequestModeRFID      = "rfid"
+	printRequestModeLabelOnly = "label"
+)
+
 func decidePendingPrintRequest(req bridgestate.PrintRequestSnapshot, zebra ZebraStatus, activeEPC string, zebraEnabled bool, rd Reading) printRequestDecision {
 	epc := strings.ToUpper(strings.TrimSpace(req.EPC))
 	if epc == "" {
@@ -28,7 +34,9 @@ func decidePendingPrintRequest(req bridgestate.PrintRequestSnapshot, zebra Zebra
 	if strings.EqualFold(strings.TrimSpace(activeEPC), epc) {
 		return printRequestNoop
 	}
-	if strings.EqualFold(strings.TrimSpace(zebra.LastEPC), epc) && strings.TrimSpace(zebra.Error) == "" {
+	if normalizePrintRequestMode(req.Mode) != printRequestModeLabelOnly &&
+		strings.EqualFold(strings.TrimSpace(zebra.LastEPC), epc) &&
+		strings.TrimSpace(zebra.Error) == "" {
 		return printRequestMarkDone
 	}
 	if !zebraEnabled {
@@ -38,6 +46,18 @@ func decidePendingPrintRequest(req bridgestate.PrintRequestSnapshot, zebra Zebra
 		return printRequestErrorDisabled
 	}
 	return printRequestExecute
+}
+
+func normalizePrintRequestMode(v string) string {
+	s := strings.ToLower(strings.TrimSpace(v))
+	switch s {
+	case "", printRequestModeRFID, "rfid-label", "rfid_label", "rfidprint":
+		return printRequestModeRFID
+	case printRequestModeLabelOnly, "label-only", "label_only", "plain", "plain-label", "plain_label", "simple":
+		return printRequestModeLabelOnly
+	default:
+		return printRequestModeRFID
+	}
 }
 
 func writePrintRequestStatus(store *bridgestate.Store, epc, status, errText string) error {
@@ -73,4 +93,70 @@ func formatLabelQty(qty *float64, unit string) string {
 		return "- " + u
 	}
 	return fmt.Sprintf("%.3f %s", *qty, u)
+}
+
+func formatGoDEXQty(qty *float64, unit string) string {
+	if qty == nil {
+		return "-"
+	}
+	return strconv.FormatFloat(*qty, 'f', -1, 64)
+}
+
+type printWeightLabels struct {
+	Netto   string
+	Brutto  string
+	HasTare bool
+}
+
+func formatPrintWeightLabels(req bridgestate.PrintRequestSnapshot) printWeightLabels {
+	netQty := req.Qty
+	grossQty := req.GrossQty
+	if grossQty == nil {
+		grossQty = req.Qty
+	}
+	if !req.Tare || req.TareKG <= 0 || grossQty == nil {
+		return printWeightLabels{Netto: formatLabelQty(req.Qty, req.Unit)}
+	}
+	if netQty == nil {
+		net := *grossQty - req.TareKG
+		if net < 0 {
+			net = 0
+		}
+		netQty = &net
+	}
+	return printWeightLabels{
+		Netto:   formatTrimmedQty(*netQty, req.Unit),
+		Brutto:  formatTrimmedQty(*grossQty, req.Unit),
+		HasTare: true,
+	}
+}
+
+func formatGoDEXWeightLabels(req bridgestate.PrintRequestSnapshot, defaultBrutto string) printWeightLabels {
+	labels := formatPrintWeightLabels(req)
+	if labels.HasTare {
+		return printWeightLabels{
+			Netto:   stripKGUnit(labels.Netto),
+			Brutto:  stripKGUnit(labels.Brutto),
+			HasTare: true,
+		}
+	}
+	return printWeightLabels{
+		Netto:  formatGoDEXQty(req.Qty, req.Unit),
+		Brutto: strings.TrimSpace(defaultBrutto),
+	}
+}
+
+func formatTrimmedQty(qty float64, unit string) string {
+	u := strings.TrimSpace(unit)
+	if u == "" {
+		u = "kg"
+	}
+	return strconv.FormatFloat(qty, 'f', -1, 64) + " " + u
+}
+
+func stripKGUnit(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimSuffix(v, "kg")
+	v = strings.TrimSuffix(v, "KG")
+	return strings.TrimSpace(v)
 }

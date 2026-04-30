@@ -277,3 +277,17 @@ func TestBatchFlowStableFramesDoNotProduceTinyPositiveWeights(t *testing.T) {
 		}
 	}
 }
+
+func TestBatchFlowStableFramesAreLargeEnoughForTareDemo(t *testing.T) {
+	t.Parallel()
+
+	cycle := buildScenarioCycle("batch-flow", 42)
+	if len(cycle) == 0 {
+		t.Fatal("batch-flow cycle is empty")
+	}
+	for _, frame := range cycle {
+		if frame.stable && frame.weight > 0 && frame.weight < 2.5 {
+			t.Fatalf("stable frame should be large enough for tare demo: %.3f", frame.weight)
+		}
+	}
+}

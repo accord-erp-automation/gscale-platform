@@ -7,19 +7,57 @@ import (
 )
 
 type Selection struct {
-	ItemCode  string
-	ItemName  string
-	Warehouse string
+	ItemCode    string
+	ItemName    string
+	Warehouse   string
+	PrintMode   string
+	Printer     string
+	TareEnabled bool
+	TareKG      float64
 }
 
 func (s Selection) Normalize() Selection {
 	s.ItemCode = strings.TrimSpace(s.ItemCode)
 	s.ItemName = strings.TrimSpace(s.ItemName)
 	s.Warehouse = strings.TrimSpace(s.Warehouse)
+	s.PrintMode = normalizePrintMode(s.PrintMode)
+	s.Printer = strings.ToLower(strings.TrimSpace(s.Printer))
+	if !s.TareEnabled || s.TareKG <= 0 {
+		s.TareEnabled = false
+		s.TareKG = 0
+	}
 	if s.ItemName == "" {
 		s.ItemName = s.ItemCode
 	}
 	return s
+}
+
+func (s Selection) NetQty(grossQty float64) float64 {
+	s = s.Normalize()
+	if !s.TareEnabled {
+		return grossQty
+	}
+	net := grossQty - s.TareKG
+	if net < 0 {
+		return 0
+	}
+	return net
+}
+
+const (
+	PrintModeRFID      = "rfid"
+	PrintModeLabelOnly = "label"
+)
+
+func normalizePrintMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", PrintModeRFID, "rfid-label", "rfid_label", "rfidprint":
+		return PrintModeRFID
+	case PrintModeLabelOnly, "label-only", "label_only", "plain", "plain-label", "plain_label", "simple":
+		return PrintModeLabelOnly
+	default:
+		return PrintModeRFID
+	}
 }
 
 type StableReading struct {
@@ -80,7 +118,7 @@ type ERP interface {
 }
 
 type PrintRequestWriter interface {
-	SetPrintRequest(epc string, qty float64, unit string, selection Selection)
+	SetPrintRequest(epc string, qty float64, grossQty float64, unit string, selection Selection)
 	ClearPrintRequest()
 }
 

@@ -36,6 +36,10 @@ func sanitizeZPLText(v string) string {
 }
 
 func buildRFIDEncodeCommand(epc, qtyText, itemName string) (string, error) {
+	return buildRFIDEncodeCommandWithWeights(epc, qtyText, "", itemName)
+}
+
+func buildRFIDEncodeCommandWithWeights(epc, qtyText, bruttoText, itemName string) (string, error) {
 	norm, err := normalizeEPC(epc)
 	if err != nil {
 		return "", err
@@ -45,10 +49,12 @@ func buildRFIDEncodeCommand(epc, qtyText, itemName string) (string, error) {
 	if qty == "" {
 		qty = "- kg"
 	}
+	brutto := sanitizeZPLText(strings.TrimSpace(bruttoText))
 	item := sanitizeZPLText(strings.TrimSpace(itemName))
 	if item == "" {
 		item = "-"
 	}
+	weightBlock, epcY, barcodeY := buildZebraWeightBlock(qty, brutto)
 
 	// ~PS oldingi pause holatini yechadi; keyingi ZPL job aniq ketadi.
 	// ^RS8,,,1,N — TagType=8 (Gen2 EPC Class 1 Gen2), LabelsToTry=1, ErrorHandling=N.
@@ -63,14 +69,64 @@ func buildRFIDEncodeCommand(epc, qtyText, itemName string) (string, error) {
 		fmt.Sprintf("^RFW,H,,,A^FD%s^FS\n", norm) +
 		"^FO8,52^A0N,38,32^FB760,1,0,L,0\n" +
 		fmt.Sprintf("^FDMAHSULOT: %s^FS\n", item) +
-		"^FO8,118^A0N,44,38\n" +
-		fmt.Sprintf("^FDVAZNI: %s^FS\n", qty) +
-		"^FO8,184^A0N,24,20^FB760,1,0,L,0\n" +
+		weightBlock +
+		fmt.Sprintf("^FO8,%d^A0N,24,20^FB760,1,0,L,0\n", epcY) +
 		fmt.Sprintf("^FDEPC: %s^FS\n", sanitizeZPLText(norm)) +
-		"^FO8,236^BY3,2,44^BCN,44,N,N,N\n" +
+		fmt.Sprintf("^FO8,%d^BY3,2,44^BCN,44,N,N,N\n", barcodeY) +
 		fmt.Sprintf("^FD%s^FS\n", sanitizeZPLText(norm)) +
 		"^PQ1\n" +
 		"^XZ\n", nil
+}
+
+func buildLabelOnlyPrintCommand(epc, qtyText, itemName string) (string, error) {
+	return buildLabelOnlyPrintCommandWithWeights(epc, qtyText, "", itemName)
+}
+
+func buildLabelOnlyPrintCommandWithWeights(epc, qtyText, bruttoText, itemName string) (string, error) {
+	norm, err := normalizeEPC(epc)
+	if err != nil {
+		return "", err
+	}
+
+	qty := sanitizeZPLText(strings.TrimSpace(qtyText))
+	if qty == "" {
+		qty = "- kg"
+	}
+	brutto := sanitizeZPLText(strings.TrimSpace(bruttoText))
+	item := sanitizeZPLText(strings.TrimSpace(itemName))
+	if item == "" {
+		item = "-"
+	}
+	weightBlock, epcY, barcodeY := buildZebraWeightBlock(qty, brutto)
+
+	return "~PS\n" +
+		"^XA\n" +
+		"^LH0,0\n" +
+		"^MMT\n" +
+		"^FO8,52^A0N,38,32^FB760,1,0,L,0\n" +
+		fmt.Sprintf("^FDMAHSULOT: %s^FS\n", item) +
+		weightBlock +
+		fmt.Sprintf("^FO8,%d^A0N,24,20^FB760,1,0,L,0\n", epcY) +
+		fmt.Sprintf("^FDEPC: %s^FS\n", sanitizeZPLText(norm)) +
+		fmt.Sprintf("^FO8,%d^BY3,2,44^BCN,44,N,N,N\n", barcodeY) +
+		fmt.Sprintf("^FD%s^FS\n", sanitizeZPLText(norm)) +
+		"^PQ1\n" +
+		"^XZ\n", nil
+}
+
+func buildZebraWeightBlock(nettoText, bruttoText string) (string, int, int) {
+	if strings.TrimSpace(bruttoText) == "" {
+		return "^FO8,118^A0N,44,38\n" +
+				fmt.Sprintf("^FDVAZNI: %s^FS\n", nettoText),
+			184,
+			236
+	}
+	return "^FO8,112^A0N,36,32\n" +
+			fmt.Sprintf("^FDNETTO: %s^FS\n", nettoText) +
+			"^FO8,158^A0N,36,32\n" +
+			fmt.Sprintf("^FDBRUTTO: %s^FS\n", bruttoText),
+		220,
+		272
 }
 
 func normalizeEPC(epc string) (string, error) {

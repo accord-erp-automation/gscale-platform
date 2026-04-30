@@ -52,6 +52,49 @@ func TestBuildRFIDEncodeCommand_DefaultQtyWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildLabelOnlyPrintCommand_OmitsRFIDWrite(t *testing.T) {
+	stream, err := buildLabelOnlyPrintCommand("3034ABCDEF1234567890AABB", "1.250 kg", "GREEN TEA")
+	if err != nil {
+		t.Fatalf("buildLabelOnlyPrintCommand error: %v", err)
+	}
+
+	if !strings.HasPrefix(stream, "~PS\n^XA\n") {
+		t.Fatalf("stream must start with resume+format: %q", stream)
+	}
+	if strings.Contains(stream, "^RFW,H,,,A") {
+		t.Fatalf("label-only stream must not include RFID write: %s", stream)
+	}
+	if strings.Contains(stream, "^RS8,,,1,N") {
+		t.Fatalf("label-only stream must not include RFID setup: %s", stream)
+	}
+	if !strings.Contains(stream, "^FDMAHSULOT: GREEN TEA^FS") {
+		t.Fatalf("human label item missing: %s", stream)
+	}
+	if !strings.Contains(stream, "^FDEPC: 3034ABCDEF1234567890AABB^FS") {
+		t.Fatalf("human EPC line missing: %s", stream)
+	}
+	if !strings.Contains(stream, "^BCN,44,N,N,N") {
+		t.Fatalf("barcode command missing: %s", stream)
+	}
+}
+
+func TestBuildLabelOnlyPrintCommand_WithTareShowsNettoAndBrutto(t *testing.T) {
+	stream, err := buildLabelOnlyPrintCommandWithWeights("3034ABCDEF1234567890AABB", "4.22 kg", "5 kg", "GREEN TEA")
+	if err != nil {
+		t.Fatalf("buildLabelOnlyPrintCommandWithWeights error: %v", err)
+	}
+
+	if !strings.Contains(stream, "^FDNETTO: 4.22 kg^FS") {
+		t.Fatalf("netto line missing: %s", stream)
+	}
+	if !strings.Contains(stream, "^FDBRUTTO: 5 kg^FS") {
+		t.Fatalf("brutto line missing: %s", stream)
+	}
+	if strings.Contains(stream, "^FDVAZNI:") {
+		t.Fatalf("tare label should not use generic VAZNI line: %s", stream)
+	}
+}
+
 func TestNormalizeEPC_RejectsNonWordAligned(t *testing.T) {
 	// 22 belgi: 22%4=2 — rad etilishi kerak
 	_, err := normalizeEPC("3034ABCDEF1234567890AA")

@@ -1,0 +1,8 @@
+[worker.godex_action] 2026/04/30 12:34:17.186574 label start: company=Accord epc=30AB228AB5676D70587CF039 kg=5.438 product=zizi yeryongoq timeout=5s
+[worker.godex_action] 2026/04/30 12:34:21.489123 label done: device=usb:195f:0001 line1=00,00000 line2=50,00001 note=godex label printed; rfid encode skipped error=
+[worker.godex_action] 2026/04/30 12:34:21.736003 label start: company=Accord epc=30AB228BC2704D40BDB5DE57 kg=5.438 product=zizi yeryongoq timeout=5s
+[worker.godex_action] 2026/04/30 12:34:28.395408 label done: device=usb:195f:0001 line1= line2= note=godex label printed; rfid encode skipped error=GoDEX G500 not found
+[worker.godex_action] 2026/04/30 12:36:36.485362 label start: company=Accord epc=30AB22AB2159CD8C95B4586F kg=2.231 product=zizi yeryongoq timeout=5s
+[worker.godex_action] 2026/04/30 12:36:40.787079 label done: device=usb:195f:0001 line1=00,00000 line2=50,00001 note=godex label printed; rfid encode skipped error=
+[worker.godex_action] 2026/04/30 12:36:41.036343 label start: company=Accord epc=30AB22AC0ECE03496C31AA65 kg=2.231 product=zizi yeryongoq timeout=5s
+[worker.godex_action] 2026/04/30 12:36:47.691270 label done: device=usb:195f:0001 line1= line2= note=godex label printed; rfid encode skipped error=GoDEX G500 not found
