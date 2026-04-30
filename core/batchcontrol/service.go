@@ -2,6 +2,7 @@ package batchcontrol
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"core/workflow"
@@ -30,6 +31,7 @@ type BatchStateWriter interface {
 
 type Runner interface {
 	Run(ctx context.Context, selection workflow.Selection, hooks workflow.Hooks) error
+	PrintOnce(ctx context.Context, selection workflow.Selection, grossQty float64) (workflow.Draft, string, error)
 }
 
 type Logger interface {
@@ -166,6 +168,29 @@ func (s *Service) Stop(ownerID int64) bool {
 		return true
 	}
 	return false
+}
+
+func (s *Service) ManualPrint(ctx context.Context, ownerID int64, grossQty float64) (workflow.Draft, string, error) {
+	if s == nil || s.runner == nil {
+		return workflow.Draft{}, "", fmt.Errorf("manual print runner bo'sh")
+	}
+	if grossQty <= 0 {
+		return workflow.Draft{}, "", fmt.Errorf("manual qty required")
+	}
+
+	s.mu.Lock()
+	session, ok := s.batchByID[ownerID]
+	s.mu.Unlock()
+	if !ok {
+		return workflow.Draft{}, "", fmt.Errorf("manual batch active emas")
+	}
+
+	selection := session.selection.Normalize()
+	if !selection.UsesManualQty() {
+		return workflow.Draft{}, "", fmt.Errorf("manual print faqat manual batch uchun")
+	}
+	selection.ManualQtyKG = grossQty
+	return s.runner.PrintOnce(ctx, selection, grossQty)
 }
 
 func (s *Service) StopAll() {

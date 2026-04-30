@@ -40,34 +40,34 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 	lastSuccess := LastSuccess{}
 	totalQty := 0.0
 	manualMode := selection.UsesManualQty()
+	if manualMode {
+		r.reportProgress(hooks, Progress{
+			Selection: selection,
+			Note:      "Manual batch faol | print uchun play tugmasini bosing",
+		})
+		<-ctx.Done()
+		return nil
+	}
 
 	for {
 		var reading StableReading
-		if manualMode {
-			reading = StableReading{
-				Qty:       selection.ManualQtyKG,
-				Unit:      "kg",
-				UpdatedAt: time.Now().UTC(),
-			}
-		} else {
-			var err error
-			reading, err = r.qtyReader.WaitStablePositiveReading(ctx, r.options.StableReadTimeout, r.options.StableReadPollInterval)
-			if isContextError(err) {
-				return nil
-			}
-			if err != nil {
-				if isTimeoutError(err) {
-					continue
-				}
-				r.reportProgress(hooks, Progress{
-					Selection:   selection,
-					DraftCount:  draftCount,
-					LastSuccess: lastSuccess,
-					TotalQty:    totalQty,
-					Note:        "Scale xato: " + err.Error(),
-				})
+		var err error
+		reading, err = r.qtyReader.WaitStablePositiveReading(ctx, r.options.StableReadTimeout, r.options.StableReadPollInterval)
+		if isContextError(err) {
+			return nil
+		}
+		if err != nil {
+			if isTimeoutError(err) {
 				continue
 			}
+			r.reportProgress(hooks, Progress{
+				Selection:   selection,
+				DraftCount:  draftCount,
+				LastSuccess: lastSuccess,
+				TotalQty:    totalQty,
+				Note:        "Scale xato: " + err.Error(),
+			})
+			continue
 		}
 
 		r.logf(
@@ -289,6 +289,95 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 			})
 		}
 	}
+}
+
+func (r *MaterialReceiptRunner) PrintOnce(ctx context.Context, selection Selection, grossQty float64) (Draft, string, error) {
+	if r == nil {
+		return Draft{}, "", fmt.Errorf("material receipt runner bo'sh")
+	}
+	if r.erp == nil {
+		return Draft{}, "", fmt.Errorf("material receipt erp client bo'sh")
+	}
+	if r.printRequests == nil {
+		return Draft{}, "", fmt.Errorf("material receipt print request writer bo'sh")
+	}
+	if r.epcGenerator == nil {
+		return Draft{}, "", fmt.Errorf("material receipt epc generator bo'sh")
+	}
+	selection = selection.Normalize()
+	if selection.ItemCode == "" {
+		return Draft{}, "", fmt.Errorf("material receipt item code bo'sh")
+	}
+	if selection.Warehouse == "" {
+		return Draft{}, "", fmt.Errorf("material receipt warehouse bo'sh")
+	}
+	if grossQty <= 0 {
+		grossQty = selection.ManualQtyKG
+	}
+	if grossQty < minBatchQtyKg {
+		return Draft{}, "", fmt.Errorf("QTY juda kichik: %.3f kg | min %.3f kg", grossQty, minBatchQtyKg)
+	}
+
+	reading := StableReading{
+		Qty:       grossQty,
+		Unit:      "kg",
+		UpdatedAt: time.Now().UTC(),
+	}
+	netQty := selection.NetQty(reading.Qty)
+	if netQty < minBatchQtyKg {
+		return Draft{}, "", fmt.Errorf(
+			"NETTO juda kichik: brutto %.3f kg - babina %.3f kg = %.3f kg | min %.3f kg",
+			reading.Qty,
+			selection.TareKG,
+			netQty,
+			minBatchQtyKg,
+		)
+	}
+
+	epc, draft, err := createDraftWithFreshEPC(
+		func() string {
+			return r.epcGenerator.Next(reading.UpdatedAt)
+		},
+		func(epc string) (Draft, error) {
+			return r.erp.CreateMaterialReceiptDraft(ctx, CreateMaterialReceiptDraftInput{
+				ItemCode:  selection.ItemCode,
+				Warehouse: selection.Warehouse,
+				Qty:       netQty,
+				Barcode:   epc,
+			})
+		},
+		r.isDuplicateBarcodeError,
+	)
+	if err != nil {
+		return Draft{}, epc, err
+	}
+
+	r.printRequests.SetPrintRequest(epc, draft.Qty, reading.Qty, reading.Unit, selection)
+	printResult, err := r.qtyReader.WaitPrintRequestResult(ctx, r.options.PrintResultTimeout, r.options.PrintResultPollInterval, epc)
+	r.printRequests.ClearPrintRequest()
+	if isContextError(err) {
+		return Draft{}, epc, nil
+	}
+	if err != nil {
+		_ = r.erp.DeleteStockEntryDraft(ctx, draft.Name)
+		return Draft{}, epc, err
+	}
+	if strings.ToLower(strings.TrimSpace(printResult.Status)) != "done" {
+		_ = r.erp.DeleteStockEntryDraft(ctx, draft.Name)
+		if strings.TrimSpace(printResult.Error) != "" {
+			return Draft{}, epc, fmt.Errorf("%s", strings.TrimSpace(printResult.Error))
+		}
+		return Draft{}, epc, fmt.Errorf("print failed")
+	}
+	if err := r.erp.SubmitStockEntryDraft(ctx, draft.Name); isContextError(err) {
+		return Draft{}, epc, nil
+	} else if err != nil {
+		return Draft{}, epc, err
+	}
+	if r.history != nil {
+		r.history.Add(epc)
+	}
+	return draft, epc, nil
 }
 
 func createDraftWithFreshEPC(

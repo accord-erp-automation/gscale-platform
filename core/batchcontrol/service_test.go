@@ -117,6 +117,10 @@ func (s *stubRunner) Run(ctx context.Context, selection workflow.Selection, hook
 	return ctx.Err()
 }
 
+func (s *stubRunner) PrintOnce(context.Context, workflow.Selection, float64) (workflow.Draft, string, error) {
+	return workflow.Draft{Name: "manual-print", Qty: 1}, "EPC-MANUAL", nil
+}
+
 type batchStateCall struct {
 	active    bool
 	ownerID   int64

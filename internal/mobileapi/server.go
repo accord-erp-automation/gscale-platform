@@ -59,6 +59,10 @@ type batchStartRequest struct {
 	TareKG         float64 `json:"tare_kg"`
 }
 
+type batchManualPrintRequest struct {
+	ManualQtyKG float64 `json:"manual_qty_kg"`
+}
+
 type Server struct {
 	cfg              Config
 	store            *bridgestate.Store
@@ -129,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/mobile/warehouses", s.handleWarehouses)
 	mux.HandleFunc("/v1/mobile/batch/state", s.handleBatchState)
 	mux.HandleFunc("/v1/mobile/batch/start", s.handleBatchStart)
+	mux.HandleFunc("/v1/mobile/batch/manual-print", s.handleBatchManualPrint)
 	mux.HandleFunc("/v1/mobile/batch/stop", s.handleBatchStop)
 	mux.HandleFunc("/v1/mobile/archive", s.handleArchive)
 	return mux
@@ -642,10 +647,6 @@ func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "item_code_and_warehouse_required"})
 		return
 	}
-	if selection.UsesManualQty() && selection.ManualQtyKG <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "manual_qty_required"})
-		return
-	}
 	if !s.cfg.CanRunBatchActions() {
 		writeJSON(w, http.StatusPreconditionFailed, map[string]any{"error": "erp_not_configured"})
 		return
@@ -687,6 +688,75 @@ func (s *Server) handleBatchStart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
 		"batch": batch,
+	})
+}
+
+func (s *Server) handleBatchManualPrint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if !s.control.HasActiveBatch(mobileBatchOwnerID) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "batch_not_active"})
+		return
+	}
+	active := s.control.ActiveBatch()
+	if !active.Active || !active.Selection.UsesManualQty() {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "manual_batch_required"})
+		return
+	}
+
+	var req batchManualPrintRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	grossQty := req.ManualQtyKG
+	if grossQty <= 0 {
+		snap, err := s.readBatchSnapshot()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		grossQty = snap.ManualQtyKG
+	}
+	if grossQty <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "manual_qty_required"})
+		return
+	}
+
+	draft, epc, err := s.control.ManualPrint(r.Context(), mobileBatchOwnerID, grossQty)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+
+	if s.archive != nil {
+		if err := s.archive.RecordPrint(draft.Qty, draft.UOM, draft.Name, epc, time.Now().UTC()); err != nil {
+			log.Printf("archive manual print record error: %v", err)
+		}
+	}
+	if err := s.store.Update(func(snapshot *bridgestate.Snapshot) {
+		snapshot.Batch.Active = true
+		snapshot.Batch.ChatID = mobileBatchOwnerID
+		snapshot.Batch.QuantitySource = workflow.QuantitySourceManual
+		snapshot.Batch.ManualQtyKG = grossQty
+		snapshot.Batch.TotalQty += draft.Qty
+		snapshot.Batch.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	batch, err := s.readBatchSnapshot()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"batch":   batch,
+		"message": "manual print queued",
 	})
 }
 
@@ -760,14 +830,6 @@ func (s *Server) persistBatchProgress(progress workflow.Progress) {
 		time.Now().UTC(),
 	); err != nil {
 		log.Printf("archive print record error: %v", err)
-	}
-	if progress.Selection.UsesManualQty() {
-		if err := s.archive.CloseSession(time.Now().UTC()); err != nil {
-			log.Printf("archive manual close error: %v", err)
-		}
-		s.mu.Lock()
-		s.archiveLastDraftCount = 0
-		s.mu.Unlock()
 	}
 }
 

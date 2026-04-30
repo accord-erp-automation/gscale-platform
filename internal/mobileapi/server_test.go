@@ -840,6 +840,87 @@ func TestBatchStartPropagatesPrintMode(t *testing.T) {
 	}
 }
 
+func TestBatchManualPrintKeepsBatchActive(t *testing.T) {
+	t.Parallel()
+
+	stateFile := t.TempDir() + "/bridge_state.json"
+	store := bridgestate.New(stateFile)
+	runner := &blockingRunner{
+		started: make(chan struct{}, 1),
+		stopped: make(chan struct{}, 1),
+		printed: make(chan struct{}, 1),
+	}
+	server := newServer(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: stateFile,
+		ERPURL:          "http://localhost:8000",
+		ERPAPIKey:       "key-123",
+		ERPAPISecret:    "secret-123",
+	}, batchcontrol.New(batchcontrol.Dependencies{
+		Catalog:    stubCatalog{},
+		BatchState: bridgeBatchStateWriter{store: store},
+		Runner:     runner,
+	}))
+	defer func() {
+		server.Close()
+		select {
+		case <-runner.stopped:
+		case <-time.After(2 * time.Second):
+		}
+	}()
+
+	startReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea","warehouse":"Stores - A","print_mode":"label","printer":"g500","quantity_source":"manual","tare_enabled":true,"tare_kg":0.78}`))
+	startRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(startRec, startReq)
+	if startRec.Code != http.StatusOK {
+		t.Fatalf("start status = %d body=%s", startRec.Code, startRec.Body.String())
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not start")
+	}
+
+	printReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/manual-print", bytes.NewBufferString(`{"manual_qty_kg":5}`))
+	printRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(printRec, printReq)
+	if printRec.Code != http.StatusOK {
+		t.Fatalf("manual print status = %d body=%s", printRec.Code, printRec.Body.String())
+	}
+	select {
+	case <-runner.printed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual print was not triggered")
+	}
+	if runner.lastPrintQty != 5 {
+		t.Fatalf("manual print qty = %.3f", runner.lastPrintQty)
+	}
+
+	snap, err := store.Read()
+	if err != nil {
+		t.Fatalf("read bridge after manual print: %v", err)
+	}
+	if !snap.Batch.Active {
+		t.Fatal("batch became inactive after manual print")
+	}
+	if snap.Batch.QuantitySource != workflow.QuantitySourceManual {
+		t.Fatalf("batch quantity source = %q", snap.Batch.QuantitySource)
+	}
+	if snap.Batch.ManualQtyKG != 5 {
+		t.Fatalf("batch manual qty = %.3f", snap.Batch.ManualQtyKG)
+	}
+	if snap.Batch.TotalQty <= 0 {
+		t.Fatalf("batch total qty = %.3f", snap.Batch.TotalQty)
+	}
+
+	stopReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/stop", nil)
+	stopRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(stopRec, stopReq)
+	if stopRec.Code != http.StatusOK {
+		t.Fatalf("stop status = %d body=%s", stopRec.Code, stopRec.Body.String())
+	}
+}
+
 func TestBridgePrintRequestWriterUsesSelectionPrintMode(t *testing.T) {
 	t.Parallel()
 
@@ -1099,8 +1180,10 @@ func (s stubCatalog) SearchItemWarehouses(context.Context, string, string, int) 
 type blockingRunner struct {
 	started       chan struct{}
 	stopped       chan struct{}
+	printed       chan struct{}
 	progresses    []workflow.Progress
 	lastSelection workflow.Selection
+	lastPrintQty  float64
 }
 
 func (r *blockingRunner) Run(ctx context.Context, selection workflow.Selection, hooks workflow.Hooks) error {
@@ -1120,4 +1203,21 @@ func (r *blockingRunner) Run(ctx context.Context, selection workflow.Selection, 
 		r.stopped <- struct{}{}
 	}
 	return nil
+}
+
+func (r *blockingRunner) PrintOnce(ctx context.Context, selection workflow.Selection, grossQty float64) (workflow.Draft, string, error) {
+	selection = selection.Normalize()
+	r.lastSelection = selection
+	r.lastPrintQty = grossQty
+	if r.printed != nil {
+		r.printed <- struct{}{}
+	}
+	return workflow.Draft{
+		Name:      "MAT-STE-PRINT",
+		ItemCode:  selection.ItemCode,
+		Warehouse: selection.Warehouse,
+		Qty:       grossQty - selection.TareKG,
+		UOM:       "kg",
+		Barcode:   "EPC-PRINT",
+	}, "EPC-PRINT", nil
 }

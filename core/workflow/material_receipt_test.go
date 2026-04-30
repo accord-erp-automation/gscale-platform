@@ -233,7 +233,7 @@ func TestMaterialReceiptRunnerRunWithTareUsesNetQtyAndPrintGrossQty(t *testing.T
 	}
 }
 
-func TestMaterialReceiptRunnerManualQtyPrintsOnceWithoutScaleCycle(t *testing.T) {
+func TestMaterialReceiptRunnerManualPrintOnceUsesProvidedQty(t *testing.T) {
 	t.Parallel()
 
 	reader := &stubQtyReader{
@@ -258,23 +258,25 @@ func TestMaterialReceiptRunnerManualQtyPrintsOnceWithoutScaleCycle(t *testing.T)
 		History:       history,
 	})
 
-	err := runner.Run(context.Background(), Selection{
+	draft, epc, err := runner.PrintOnce(context.Background(), Selection{
 		ItemCode:       "ITEM-1",
 		ItemName:       "Tea",
 		Warehouse:      "Stores - A",
 		QuantitySource: QuantitySourceManual,
-		ManualQtyKG:    5,
 		TareEnabled:    true,
 		TareKG:         0.78,
-	}, Hooks{})
+	}, 5)
 	if err != nil {
-		t.Fatalf("Run error: %v", err)
+		t.Fatalf("PrintOnce error: %v", err)
+	}
+	if epc != "EPC-MANUAL" {
+		t.Fatalf("epc = %q", epc)
+	}
+	if draft.Qty == 0 {
+		t.Fatal("draft qty is zero")
 	}
 	if reader.stableIdx != 0 {
-		t.Fatalf("manual mode should not read scale, stable reads = %d", reader.stableIdx)
-	}
-	if reader.nextCycleIdx != 0 {
-		t.Fatalf("manual mode should not wait for next cycle, calls = %d", reader.nextCycleIdx)
+		t.Fatalf("PrintOnce should not read scale, stable reads = %d", reader.stableIdx)
 	}
 	if len(erpClient.createInputs) != 1 {
 		t.Fatalf("create inputs = %d", len(erpClient.createInputs))
@@ -290,6 +292,51 @@ func TestMaterialReceiptRunnerManualQtyPrintsOnceWithoutScaleCycle(t *testing.T)
 	}
 	if !slices.Equal(history.items, []string{"EPC-MANUAL"}) {
 		t.Fatalf("history = %#v", history.items)
+	}
+}
+
+func TestMaterialReceiptRunnerManualRunWaitsForStop(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reader := &stubQtyReader{}
+	erpClient := &stubERP{}
+	printWriter := &stubPrintRequestWriter{}
+	runner := NewMaterialReceiptRunner(MaterialReceiptDependencies{
+		QtyReader:     reader,
+		ERP:           erpClient,
+		PrintRequests: printWriter,
+		EPCGenerator:  &stubGenerator{epcs: []string{"EPC-MANUAL"}},
+		History:       &stubHistory{},
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runner.Run(ctx, Selection{
+			ItemCode:       "ITEM-1",
+			ItemName:       "Tea",
+			Warehouse:      "Stores - A",
+			QuantitySource: QuantitySourceManual,
+		}, Hooks{})
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	if reader.stableIdx != 0 {
+		t.Fatalf("manual run should not read scale, stable reads = %d", reader.stableIdx)
+	}
+	if len(erpClient.createInputs) != 0 {
+		t.Fatalf("manual run should not create draft, got %d", len(erpClient.createInputs))
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual run did not stop after cancel")
 	}
 }
 
