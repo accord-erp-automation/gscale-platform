@@ -67,6 +67,7 @@ func TestBuildPackLabelMatchesExpectedEZPLShape(t *testing.T) {
 		"^W50",
 		"Y0,0,TEXTLBL",
 		"BA,",
+		"Y224,224,QRLBL",
 		"30A5FEA7709854D93C2B7593",
 		"QRLBL",
 		"E",
