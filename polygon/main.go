@@ -283,7 +283,7 @@ func buildBatchFlowCycle(rng *rand.Rand) []cycleFrame {
 	frames := make([]cycleFrame, 0, 128)
 	rounds := 6 + rng.Intn(3)
 	for i := 0; i < rounds; i++ {
-		target := roundWeight(0.360 + rng.Float64()*1.650 + float64(i%2)*0.075)
+		target := roundWeight(3.000 + rng.Float64()*3.500 + float64(i%2)*0.350)
 		frames = append(frames,
 			cycleFrame{weight: 0, stable: true, duration: randDuration(rng, 700*time.Millisecond, 1100*time.Millisecond)},
 		)

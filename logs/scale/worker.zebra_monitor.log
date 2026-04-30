@@ -1,0 +1,6 @@
+[worker.zebra_monitor] 2026/04/30 12:33:28.184829 start: preferred_device=/dev/usb/lp0 interval=900ms
+[worker.zebra_monitor] 2026/04/30 12:33:28.185076 ready: zebra device=/dev/usb/lp0 verify=-
+[worker.zebra_monitor] 2026/04/30 12:34:17.685332 wait: zebra device=/dev/usb/lp0
+[worker.zebra_monitor] 2026/04/30 12:34:28.485699 ready: zebra device=/dev/usb/lp0 verify=-
+[worker.zebra_monitor] 2026/04/30 12:36:37.185148 wait: zebra device=/dev/usb/lp0
+[worker.zebra_monitor] 2026/04/30 12:36:47.985989 ready: zebra device=/dev/usb/lp0 verify=-

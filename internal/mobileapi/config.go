@@ -27,6 +27,7 @@ type Config struct {
 	ERPReadURL       string
 	ERPAPIKey        string
 	ERPAPISecret     string
+	DevERPWrite      bool
 	WarehouseMode    string
 	DefaultWarehouse string
 	ServerName       string
@@ -78,6 +79,7 @@ func LoadConfig() Config {
 		ERPReadURL:       firstNonEmpty(os.Getenv("ERP_READ_URL"), coreCfg.ERPReadURL),
 		ERPAPIKey:        firstNonEmpty(os.Getenv("ERP_API_KEY"), coreCfg.ERPAPIKey),
 		ERPAPISecret:     firstNonEmpty(os.Getenv("ERP_API_SECRET"), coreCfg.ERPAPISecret),
+		DevERPWrite:      parseBoolEnv(os.Getenv("MOBILE_API_DEV_ERP_WRITE")),
 		WarehouseMode:    normalizeWarehouseMode(firstNonEmpty(os.Getenv("WAREHOUSE_MODE"), coreCfg.WarehouseMode)),
 		DefaultWarehouse: firstNonEmpty(os.Getenv("DEFAULT_WAREHOUSE"), coreCfg.DefaultWarehouse),
 		ServerName:       firstNonEmpty(os.Getenv("MOBILE_API_SERVER_NAME"), hostname, "gscale-zebra"),
@@ -100,6 +102,10 @@ func (c Config) HasERPWriteConfig() bool {
 		strings.TrimSpace(c.ERPAPISecret) != ""
 }
 
+func (c Config) CanRunBatchActions() bool {
+	return c.DevERPWrite || c.HasERPWriteConfig()
+}
+
 func (c Config) HasDefaultWarehouse() bool {
 	return strings.EqualFold(strings.TrimSpace(c.WarehouseMode), "default") &&
 		strings.TrimSpace(c.DefaultWarehouse) != ""
@@ -113,4 +119,13 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseBoolEnv(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }

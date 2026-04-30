@@ -70,23 +70,7 @@ func queryVarRetry(device, key string, timeout time.Duration, retries int, delay
 }
 
 func queryVarSoft(device, key string, timeout time.Duration) (string, error) {
-	type result struct {
-		v   string
-		err error
-	}
-
-	ch := make(chan result, 1)
-	go func() {
-		v, err := queryZebraSGDVar(device, key, timeout)
-		ch <- result{v: v, err: err}
-	}()
-
-	select {
-	case r := <-ch:
-		return r.v, r.err
-	case <-time.After(timeout + 250*time.Millisecond):
-		return "", errors.New("query timeout")
-	}
+	return queryZebraSGDVar(device, key, timeout)
 }
 
 func isBusyLikeError(err error) bool {

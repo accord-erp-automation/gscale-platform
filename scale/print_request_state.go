@@ -60,6 +60,12 @@ func (r *printRequestReader) refresh(now time.Time) {
 	req.ItemCode = strings.TrimSpace(req.ItemCode)
 	req.ItemName = strings.TrimSpace(req.ItemName)
 	req.Unit = strings.TrimSpace(req.Unit)
+	req.Mode = normalizePrintRequestMode(req.Mode)
+	req.Printer = normalizePrintRequestPrinter(req.Printer)
+	if !req.Tare || req.TareKG <= 0 {
+		req.Tare = false
+		req.TareKG = 0
+	}
 	if req.ItemName == "" {
 		req.ItemName = req.ItemCode
 	}

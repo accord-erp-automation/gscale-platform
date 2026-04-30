@@ -272,7 +272,7 @@ run-dev: fresh-bridge-state
 		sed -n '1,160p' /tmp/gscale-zebra/polygon.log; \
 		exit 1; \
 	fi; \
-	env MOBILE_API_ADDR="$$MOBILE_API_ADDR_RESOLVED" MOBILE_API_CANDIDATE_PORTS="$(MOBILE_API_CANDIDATE_PORTS)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" MOBILE_API_SETUP_FILE="$$DEV_CORE_ENV_FILE" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
+	env MOBILE_API_ADDR="$$MOBILE_API_ADDR_RESOLVED" MOBILE_API_CANDIDATE_PORTS="$(MOBILE_API_CANDIDATE_PORTS)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" MOBILE_API_SETUP_FILE="$$DEV_CORE_ENV_FILE" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT" MOBILE_API_DEV_ERP_WRITE=1 "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
 	MOBILEAPI_PID=$$!; \
 	echo "$$MOBILEAPI_PID" >/tmp/gscale-zebra/mobileapi.pid; \
 	for i in $$(seq 1 40); do \
@@ -336,11 +336,11 @@ stop-gscale-systemd-services:
 		done; \
 		if [ -n "$$UNITS" ]; then \
 			echo "[run-dev] stopping systemd services:$${UNITS}"; \
-			sudo -n systemctl stop $$UNITS || { \
-				echo "run-dev: systemd services active, lekin sudo parolsiz stop bo'lmadi"; \
-				echo "run-dev: avval qo'lda bajaring: sudo systemctl stop$${UNITS}"; \
+			sudo -v || { \
+				echo "run-dev: sudo permission kerak, systemd services stop bo'lmadi"; \
 				exit 1; \
 			}; \
+			sudo systemctl stop $$UNITS; \
 		fi; \
 	fi
 

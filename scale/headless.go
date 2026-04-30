@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-func runHeadless(ctx context.Context, updates <-chan Reading, zebraUpdates <-chan ZebraStatus, serialDevice string, serialBaud int, zebraPreferred string, bridgeStateFile string, autoWhenNoBatch bool, serialErr error, status *consoleStatus) error {
-	rs := newRuntimeState(ctx, updates, zebraUpdates, zebraPreferred, bridgeStateFile, autoWhenNoBatch, serialErr)
+func runHeadless(ctx context.Context, updates <-chan Reading, zebraUpdates <-chan ZebraStatus, serialDevice string, serialBaud int, zebraPreferred string, bridgeStateFile string, autoWhenNoBatch bool, serialErr error, status *consoleStatus, printBackend string, godexCompany string, godexBrutto string) error {
+	rs := newRuntimeState(ctx, updates, zebraUpdates, zebraPreferred, bridgeStateFile, autoWhenNoBatch, serialErr, printBackend, godexCompany, godexBrutto)
 	lg := workerLog("main")
 	lg.Printf("headless mode started")
 	if status != nil {

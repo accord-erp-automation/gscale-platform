@@ -39,6 +39,10 @@ type BatchSnapshot struct {
 	ItemCode  string  `json:"item_code,omitempty"`
 	ItemName  string  `json:"item_name,omitempty"`
 	Warehouse string  `json:"warehouse,omitempty"`
+	PrintMode string  `json:"print_mode,omitempty"`
+	Printer   string  `json:"printer,omitempty"`
+	Tare      bool    `json:"tare,omitempty"`
+	TareKG    float64 `json:"tare_kg,omitempty"`
 	TotalQty  float64 `json:"total_qty,omitempty"`
 	UpdatedAt string  `json:"updated_at,omitempty"`
 }
@@ -46,9 +50,14 @@ type BatchSnapshot struct {
 type PrintRequestSnapshot struct {
 	EPC         string   `json:"epc,omitempty"`
 	Qty         *float64 `json:"qty"`
+	GrossQty    *float64 `json:"gross_qty,omitempty"`
 	Unit        string   `json:"unit,omitempty"`
 	ItemCode    string   `json:"item_code,omitempty"`
 	ItemName    string   `json:"item_name,omitempty"`
+	Mode        string   `json:"mode,omitempty"`
+	Printer     string   `json:"printer,omitempty"`
+	Tare        bool     `json:"tare,omitempty"`
+	TareKG      float64  `json:"tare_kg,omitempty"`
 	Status      string   `json:"status,omitempty"`
 	Error       string   `json:"error,omitempty"`
 	RequestedAt string   `json:"requested_at,omitempty"`

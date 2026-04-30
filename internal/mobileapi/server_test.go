@@ -9,9 +9,9 @@ import (
 	"core/workflow"
 	"encoding/json"
 	"errors"
-	"os"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -732,6 +732,9 @@ func TestBatchStartUsesDefaultWarehouseWhenConfigured(t *testing.T) {
 	if snap.Batch.Warehouse != "Stores - A" {
 		t.Fatalf("batch warehouse = %q", snap.Batch.Warehouse)
 	}
+	if snap.Batch.PrintMode != workflow.PrintModeRFID {
+		t.Fatalf("batch print mode = %q", snap.Batch.PrintMode)
+	}
 }
 
 func TestBatchStartFailsFastWhenERPNotConfigured(t *testing.T) {
@@ -756,6 +759,128 @@ func TestBatchStartFailsFastWhenERPNotConfigured(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"erp_not_configured"`)) {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestBatchStartPropagatesPrintMode(t *testing.T) {
+	t.Parallel()
+
+	stateFile := t.TempDir() + "/bridge_state.json"
+	store := bridgestate.New(stateFile)
+	runner := &blockingRunner{
+		started: make(chan struct{}, 1),
+		stopped: make(chan struct{}, 1),
+	}
+	server := newServer(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: stateFile,
+		ERPURL:          "http://localhost:8000",
+		ERPAPIKey:       "key-123",
+		ERPAPISecret:    "secret-123",
+	}, batchcontrol.New(batchcontrol.Dependencies{
+		Catalog:    stubCatalog{},
+		BatchState: bridgeBatchStateWriter{store: store},
+		Runner:     runner,
+	}))
+	defer func() {
+		server.Close()
+		select {
+		case <-runner.stopped:
+		case <-time.After(2 * time.Second):
+		}
+	}()
+
+	startReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/start", bytes.NewBufferString(`{"item_code":"ITEM-001","item_name":"Green Tea","warehouse":"Stores - A","print_mode":"label","printer":"g500","tare_enabled":true,"tare_kg":0.78}`))
+	startRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(startRec, startReq)
+
+	if startRec.Code != http.StatusOK {
+		t.Fatalf("start status = %d body=%s", startRec.Code, startRec.Body.String())
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not start")
+	}
+	if runner.lastSelection.PrintMode != workflow.PrintModeLabelOnly {
+		t.Fatalf("runner print mode = %q", runner.lastSelection.PrintMode)
+	}
+	if runner.lastSelection.Printer != "godex" {
+		t.Fatalf("runner printer = %q", runner.lastSelection.Printer)
+	}
+	if !runner.lastSelection.TareEnabled || runner.lastSelection.TareKG != 0.78 {
+		t.Fatalf("runner tare = enabled:%v kg:%v", runner.lastSelection.TareEnabled, runner.lastSelection.TareKG)
+	}
+
+	snap, err := store.Read()
+	if err != nil {
+		t.Fatalf("read bridge after start: %v", err)
+	}
+	if snap.Batch.PrintMode != workflow.PrintModeLabelOnly {
+		t.Fatalf("batch print mode = %q", snap.Batch.PrintMode)
+	}
+	if snap.Batch.Printer != "godex" {
+		t.Fatalf("batch printer = %q", snap.Batch.Printer)
+	}
+	if !snap.Batch.Tare || snap.Batch.TareKG != 0.78 {
+		t.Fatalf("batch tare = enabled:%v kg:%v", snap.Batch.Tare, snap.Batch.TareKG)
+	}
+
+	stopReq := httptest.NewRequest(http.MethodPost, "/v1/mobile/batch/stop", nil)
+	stopRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(stopRec, stopReq)
+	if stopRec.Code != http.StatusOK {
+		t.Fatalf("stop status = %d body=%s", stopRec.Code, stopRec.Body.String())
+	}
+}
+
+func TestBridgePrintRequestWriterUsesSelectionPrintMode(t *testing.T) {
+	t.Parallel()
+
+	stateFile := t.TempDir() + "/bridge_state.json"
+	store := bridgestate.New(stateFile)
+	if err := store.Update(func(snapshot *bridgestate.Snapshot) {
+		snapshot.Batch.Active = true
+		snapshot.Batch.PrintMode = workflow.PrintModeLabelOnly
+	}); err != nil {
+		t.Fatalf("seed batch state: %v", err)
+	}
+
+	writer := bridgePrintRequestWriter{store: store}
+	writer.SetPrintRequest(
+		"3034257BF7194E406994036B",
+		1.72,
+		2.5,
+		"kg",
+		workflow.Selection{
+			ItemCode:    "ITEM-001",
+			ItemName:    "Green Tea",
+			Warehouse:   "Stores - A",
+			PrintMode:   workflow.PrintModeLabelOnly,
+			Printer:     "g500",
+			TareEnabled: true,
+			TareKG:      0.78,
+		},
+	)
+
+	snap, err := store.Read()
+	if err != nil {
+		t.Fatalf("read bridge state: %v", err)
+	}
+	if snap.PrintRequest.Mode != workflow.PrintModeLabelOnly {
+		t.Fatalf("print request mode = %q", snap.PrintRequest.Mode)
+	}
+	if snap.PrintRequest.Printer != "godex" {
+		t.Fatalf("print request printer = %q", snap.PrintRequest.Printer)
+	}
+	if snap.PrintRequest.Qty == nil || *snap.PrintRequest.Qty != 1.72 {
+		t.Fatalf("print request net qty = %+v", snap.PrintRequest.Qty)
+	}
+	if snap.PrintRequest.GrossQty == nil || *snap.PrintRequest.GrossQty != 2.5 {
+		t.Fatalf("print request gross qty = %+v", snap.PrintRequest.GrossQty)
+	}
+	if !snap.PrintRequest.Tare || snap.PrintRequest.TareKG != 0.78 {
+		t.Fatalf("print request tare = enabled:%v kg:%v", snap.PrintRequest.Tare, snap.PrintRequest.TareKG)
 	}
 }
 
@@ -945,9 +1070,9 @@ func TestSetupERPCanBeCleared(t *testing.T) {
 }
 
 type stubCatalog struct {
-	items          []batchcontrol.Item
-	warehouses     []batchcontrol.WarehouseStock
-	searchItemsFn  func(context.Context, string, int, string) ([]batchcontrol.Item, error)
+	items         []batchcontrol.Item
+	warehouses    []batchcontrol.WarehouseStock
+	searchItemsFn func(context.Context, string, int, string) ([]batchcontrol.Item, error)
 }
 
 func (s stubCatalog) CheckConnection(context.Context) (string, error) {
@@ -966,17 +1091,20 @@ func (s stubCatalog) SearchItemWarehouses(context.Context, string, string, int) 
 }
 
 type blockingRunner struct {
-	started    chan struct{}
-	stopped    chan struct{}
-	progresses []workflow.Progress
+	started       chan struct{}
+	stopped       chan struct{}
+	progresses    []workflow.Progress
+	lastSelection workflow.Selection
 }
 
 func (r *blockingRunner) Run(ctx context.Context, selection workflow.Selection, hooks workflow.Hooks) error {
+	selection = selection.Normalize()
+	r.lastSelection = selection
 	if r.started != nil {
 		r.started <- struct{}{}
 	}
 	for _, progress := range r.progresses {
-		progress.Selection = selection.Normalize()
+		progress.Selection = selection
 		if hooks.Progress != nil {
 			hooks.Progress(progress)
 		}

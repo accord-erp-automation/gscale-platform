@@ -95,7 +95,7 @@ func main() {
 	}
 	status := newConsoleStatus(os.Stdout, waitSerialLine(serialDevice, serialBaud), waitZebraLine(cfg.zebraDevice))
 
-	if err := runHeadless(ctx, updates, zebraUpdates, serialDevice, serialBaud, cfg.zebraDevice, cfg.bridgeStateFile, cfg.disableBot, serialErr, status); err != nil {
+	if err := runHeadless(ctx, updates, zebraUpdates, serialDevice, serialBaud, cfg.zebraDevice, cfg.bridgeStateFile, cfg.disableBot, serialErr, status, cfg.printBackend, cfg.godexCompany, cfg.godexBrutto); err != nil {
 		workerLog("main").Printf("headless run error: %v", err)
 		cancel()
 		if botProc != nil {

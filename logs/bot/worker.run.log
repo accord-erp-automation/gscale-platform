@@ -1,2 +1,0 @@
-[worker.run] 2026/04/09 11:00:10.959596 bot started, ERP=https://erp.accord.uz bridge_state=/tmp/gscale-zebra/bridge_state.json
-[worker.run] 2026/04/09 11:00:11.319780 getUpdates error: telegram: Unauthorized

@@ -39,9 +39,9 @@ func runZebraRead(preferredDevice string, timeout time.Duration) ZebraStatus {
 	return st
 }
 
-func runZebraEncodeAndRead(preferredDevice, epc, qtyText, itemName string, timeout time.Duration) ZebraStatus {
+func runZebraEncodeAndRead(preferredDevice, epc, qtyText, bruttoText, itemName string, timeout time.Duration) ZebraStatus {
 	lg := workerLog("worker.zebra_action")
-	lg.Printf("encode start: preferred_device=%s epc=%s qty=%s item=%s timeout=%s", preferredDevice, strings.TrimSpace(epc), strings.TrimSpace(qtyText), strings.TrimSpace(itemName), timeout)
+	lg.Printf("encode start: preferred_device=%s epc=%s qty=%s brutto=%s item=%s timeout=%s", preferredDevice, strings.TrimSpace(epc), strings.TrimSpace(qtyText), strings.TrimSpace(bruttoText), strings.TrimSpace(itemName), timeout)
 	zebraIOMutex.Lock()
 	defer zebraIOMutex.Unlock()
 
@@ -70,7 +70,7 @@ func runZebraEncodeAndRead(preferredDevice, epc, qtyText, itemName string, timeo
 	st.DevicePath = p.DevicePath
 	st.Name = p.DisplayName()
 
-	line1, line2, verify, attempts, autoTuned, err := encodeAndVerify(p.DevicePath, norm, qtyText, itemName, timeout)
+	line1, line2, verify, attempts, autoTuned, err := encodeAndVerify(p.DevicePath, norm, qtyText, bruttoText, itemName, timeout)
 	if err != nil {
 		st.Error = err.Error()
 		lg.Printf("encode attempt error: device=%s err=%v", p.DevicePath, err)
@@ -95,7 +95,65 @@ func runZebraEncodeAndRead(preferredDevice, epc, qtyText, itemName string, timeo
 	return st
 }
 
-func encodeAndVerify(device, epc, qtyText, itemName string, timeout time.Duration) (string, string, string, int, bool, error) {
+func runZebraLabelOnlyPrint(preferredDevice, epc, qtyText, bruttoText, itemName string, timeout time.Duration) ZebraStatus {
+	lg := workerLog("worker.zebra_action")
+	lg.Printf("label start: preferred_device=%s epc=%s qty=%s brutto=%s item=%s timeout=%s", preferredDevice, strings.TrimSpace(epc), strings.TrimSpace(qtyText), strings.TrimSpace(bruttoText), strings.TrimSpace(itemName), timeout)
+	zebraIOMutex.Lock()
+	defer zebraIOMutex.Unlock()
+
+	st := ZebraStatus{
+		Action:    "label",
+		Verify:    "SKIPPED",
+		UpdatedAt: time.Now(),
+		Attempts:  1,
+		Note:      "rfid encode skipped",
+	}
+
+	norm, err := normalizeEPC(epc)
+	if err != nil {
+		st.Error = err.Error()
+		lg.Printf("label epc normalize error: %v", err)
+		return st
+	}
+
+	p, err := SelectZebraPrinter(preferredDevice)
+	if err != nil {
+		st.Error = err.Error()
+		lg.Printf("label printer select error: %v", err)
+		return st
+	}
+	st.Connected = true
+	st.DevicePath = p.DevicePath
+	st.Name = p.DisplayName()
+
+	stream, err := buildLabelOnlyPrintCommandWithWeights(norm, qtyText, bruttoText, itemName)
+	if err != nil {
+		st.Error = err.Error()
+		lg.Printf("label stream build error: device=%s err=%v", p.DevicePath, err)
+		applyZebraSnapshot(&st, p, timeout)
+		return st
+	}
+
+	if err := sendRawRetry(p.DevicePath, []byte(stream), 8, 120*time.Millisecond); err != nil {
+		if isBusyLikeError(err) {
+			st.Error = fmt.Errorf("%w (printer busy: boshqa process /dev/usb/lp0 ni band qilgan)", err).Error()
+		} else {
+			st.Error = err.Error()
+		}
+		lg.Printf("label send error: device=%s err=%v", p.DevicePath, err)
+		applyZebraSnapshot(&st, p, timeout)
+		return st
+	}
+
+	waitReady(p.DevicePath, 1600*time.Millisecond)
+	st.DeviceState = safeText("-", queryVarRetry(p.DevicePath, "device.status", timeout, 3, 90*time.Millisecond))
+	st.MediaState = safeText("-", queryVarRetry(p.DevicePath, "media.status", timeout, 3, 90*time.Millisecond))
+	st.Note = strings.TrimSpace(strings.Join([]string{st.Note, "epc=" + norm}, " "))
+	lg.Printf("label done: device=%s note=%s error=%s", st.DevicePath, st.Note, st.Error)
+	return st
+}
+
+func encodeAndVerify(device, epc, qtyText, bruttoText, itemName string, timeout time.Duration) (string, string, string, int, bool, error) {
 	const attempts = 1
 	const autoTuned = false
 
@@ -106,7 +164,7 @@ func encodeAndVerify(device, epc, qtyText, itemName string, timeout time.Duratio
 	// - read/write power = 30 (max)
 	applyRFIDUltraSettings(device)
 
-	stream, err := buildRFIDEncodeCommand(epc, qtyText, itemName)
+	stream, err := buildRFIDEncodeCommandWithWeights(epc, qtyText, bruttoText, itemName)
 	if err != nil {
 		return "", "", "UNKNOWN", attempts, autoTuned, err
 	}
