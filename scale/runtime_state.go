@@ -9,40 +9,43 @@ import (
 )
 
 type runtimeState struct {
-	ctx                   context.Context
-	updates               <-chan Reading
-	zebraUpdates          <-chan ZebraStatus
-	zebraPreferred        string
-	printBackend          string
-	godexCompany          string
-	godexBrutto           string
-	bridgeStore           *bridgestate.Store
-	batchState            *batchStateReader
-	printRequest          *printRequestReader
-	printer               bridgestate.PrinterSnapshot
-	printerRefreshAt      time.Time
-	batchActive           bool
-	message               string
-	info                  string
-	last                  Reading
-	zebra                 ZebraStatus
-	now                   time.Time
-	activePrintRequestEPC string
-	zebraEnabled          bool
+	ctx                         context.Context
+	updates                     <-chan Reading
+	zebraUpdates                <-chan ZebraStatus
+	zebraPreferred              string
+	printBackend                string
+	godexCompany                string
+	godexBrutto                 string
+	bridgeStore                 *bridgestate.Store
+	batchState                  *batchStateReader
+	printRequest                *printRequestReader
+	archivePrintRequest         *archivePrintRequestReader
+	printer                     bridgestate.PrinterSnapshot
+	printerRefreshAt            time.Time
+	batchActive                 bool
+	message                     string
+	info                        string
+	last                        Reading
+	zebra                       ZebraStatus
+	now                         time.Time
+	activePrintRequestEPC       string
+	activeArchivePrintRequestID string
+	zebraEnabled                bool
 }
 
 func newRuntimeState(ctx context.Context, updates <-chan Reading, zebraUpdates <-chan ZebraStatus, zebraPreferred string, bridgeStateFile string, autoWhenNoBatch bool, serialErr error, printBackend string, godexCompany string, godexBrutto string) *runtimeState {
 	rs := &runtimeState{
-		ctx:            ctx,
-		updates:        updates,
-		zebraUpdates:   zebraUpdates,
-		zebraPreferred: strings.TrimSpace(zebraPreferred),
-		printBackend:   normalizePrintBackend(printBackend),
-		godexCompany:   strings.TrimSpace(godexCompany),
-		godexBrutto:    strings.TrimSpace(godexBrutto),
-		bridgeStore:    bridgestate.New(bridgeStateFile),
-		batchState:     newBatchStateReader(bridgeStateFile, autoWhenNoBatch),
-		printRequest:   newPrintRequestReader(bridgeStateFile),
+		ctx:                 ctx,
+		updates:             updates,
+		zebraUpdates:        zebraUpdates,
+		zebraPreferred:      strings.TrimSpace(zebraPreferred),
+		printBackend:        normalizePrintBackend(printBackend),
+		godexCompany:        strings.TrimSpace(godexCompany),
+		godexBrutto:         strings.TrimSpace(godexBrutto),
+		bridgeStore:         bridgestate.New(bridgeStateFile),
+		batchState:          newBatchStateReader(bridgeStateFile, autoWhenNoBatch),
+		printRequest:        newPrintRequestReader(bridgeStateFile),
+		archivePrintRequest: newArchivePrintRequestReader(bridgeStateFile),
 		printer: bridgestate.PrinterSnapshot{
 			Connected: false,
 			Label:     "ulanmagan",

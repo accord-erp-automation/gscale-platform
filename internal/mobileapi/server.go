@@ -63,6 +63,11 @@ type batchManualPrintRequest struct {
 	ManualQtyKG float64 `json:"manual_qty_kg"`
 }
 
+type archivePrintRequest struct {
+	SessionID string `json:"session_id"`
+	Printer   string `json:"printer"`
+}
+
 type Server struct {
 	cfg              Config
 	store            *bridgestate.Store
@@ -136,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/mobile/batch/manual-print", s.handleBatchManualPrint)
 	mux.HandleFunc("/v1/mobile/batch/stop", s.handleBatchStop)
 	mux.HandleFunc("/v1/mobile/archive", s.handleArchive)
+	mux.HandleFunc("/v1/mobile/archive/print", s.handleArchivePrint)
 	return mux
 }
 
@@ -824,6 +830,113 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleArchivePrint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if s == nil || s.archive == nil || s.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "archive_print_unavailable",
+		})
+		return
+	}
+
+	var req archivePrintRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "invalid_json",
+		})
+		return
+	}
+
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "session_id_required",
+		})
+		return
+	}
+
+	session, ok, err := s.archive.Session(sessionID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{
+			"error": "archive_session_not_found",
+		})
+		return
+	}
+
+	printer := normalizePrinter(req.Printer)
+	if printer == "" {
+		printer = s.archivePrintBackendChoice()
+	}
+	if printer == "" {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "printer_unavailable",
+		})
+		return
+	}
+
+	batchTime := strings.TrimSpace(session.EndedAt)
+	if batchTime == "" {
+		batchTime = strings.TrimSpace(session.StartedAt)
+	}
+	if batchTime == "" {
+		batchTime = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+
+	requestID, err := generateToken()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": "archive_request_id_failed",
+		})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	totalQty := session.TotalQty
+	if totalQty < 0 {
+		totalQty = 0
+	}
+	if err := s.store.Update(func(snapshot *bridgestate.Snapshot) {
+		snapshot.ArchivePrint = bridgestate.ArchivePrintRequestSnapshot{
+			RequestID:   requestID,
+			SessionID:   session.SessionID,
+			ItemCode:    session.ItemCode,
+			ItemName:    session.displayItemName(),
+			TotalQty:    totalQty,
+			Unit:        session.displayUnit(),
+			BatchTime:   batchTime,
+			Printer:     printer,
+			Status:      "pending",
+			RequestedAt: now,
+			UpdatedAt:   now,
+		}
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+		"archive_print": map[string]any{
+			"request_id": requestID,
+			"session_id": session.SessionID,
+			"printer":    printer,
+			"status":     "pending",
+		},
+		"message": "archive QR print queued",
+	})
+}
+
 func (s *Server) readArchiveSessions(limit int) ([]ArchiveSession, error) {
 	if s == nil || s.archive == nil {
 		return []ArchiveSession{}, nil
@@ -836,6 +949,31 @@ func (s *Server) readArchiveSessions(limit int) ([]ArchiveSession, error) {
 		return []ArchiveSession{}, nil
 	}
 	return sessions, nil
+}
+
+func (s *Server) archivePrintBackendChoice() string {
+	if s == nil || s.store == nil {
+		return ""
+	}
+	snap, err := s.store.Read()
+	if err != nil {
+		return ""
+	}
+	if !snap.Printer.Connected {
+		return ""
+	}
+	if printer := normalizePrinter(snap.Printer.Kind); printer != "" {
+		return printer
+	}
+	if printer := normalizePrinter(snap.Batch.Printer); printer != "" {
+		return printer
+	}
+	if strings.EqualFold(strings.TrimSpace(snap.Printer.Kind), "mixed") {
+		if printer := normalizePrinter(snap.Batch.Printer); printer != "" {
+			return printer
+		}
+	}
+	return ""
 }
 
 func (s *Server) readBatchSnapshot() (bridgestate.BatchSnapshot, error) {

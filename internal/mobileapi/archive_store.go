@@ -80,6 +80,18 @@ type ArchiveSession struct {
 	Prints     []ArchivePrintEntry `json:"prints,omitempty"`
 }
 
+func (s ArchiveSession) displayItemName() string {
+	itemName := strings.TrimSpace(s.ItemName)
+	if itemName != "" {
+		return itemName
+	}
+	return strings.TrimSpace(s.ItemCode)
+}
+
+func (s ArchiveSession) displayUnit() string {
+	return normalizeArchiveUnit(s.Unit)
+}
+
 type archiveSessionState struct {
 	SessionID  string
 	ItemCode   string
@@ -296,6 +308,31 @@ func (s *ArchiveStore) ListSessions(limit int) ([]ArchiveSession, error) {
 		sessions = sessions[:limit]
 	}
 	return sessions, nil
+}
+
+func (s *ArchiveStore) Session(sessionID string) (ArchiveSession, bool, error) {
+	if s == nil || strings.TrimSpace(s.path) == "" {
+		return ArchiveSession{}, false, nil
+	}
+
+	want := strings.TrimSpace(sessionID)
+	if want == "" {
+		return ArchiveSession{}, false, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sessions, _, err := s.readSessionsLocked()
+	if err != nil {
+		return ArchiveSession{}, false, err
+	}
+	for _, session := range sessions {
+		if strings.EqualFold(strings.TrimSpace(session.SessionID), want) {
+			return session, true, nil
+		}
+	}
+	return ArchiveSession{}, false, nil
 }
 
 func (s *ArchiveStore) restoreActiveSessionLocked() error {

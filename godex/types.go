@@ -6,7 +6,8 @@ const (
 	VendorID  = 0x195F
 	ProductID = 0x0001
 
-	DefaultQRBaseURL = "https://scan.wspace.sbs/L/"
+	DefaultQRBaseURL        = "https://scan.wspace.sbs/L/"
+	DefaultArchiveQRBaseURL = "https://scan.wspace.sbs/A/"
 
 	TextGraphicName = "TEXTLBL"
 	QRGraphicName   = "QRLBL"
@@ -63,12 +64,32 @@ func DefaultSimpleLabelOptions() LabelOptions {
 	}
 }
 
+func DefaultArchiveLabelOptions() LabelOptions {
+	return LabelOptions{
+		LabelLengthMM: 80,
+		LabelGapMM:    3,
+		LabelWidthMM:  60,
+		DPI:           203,
+		SafeMarginMM:  4.0,
+		QRBoxMM:       22.0,
+		RegularFont:   DefaultNotoSansRegular,
+		BoldFont:      DefaultNotoSansBold,
+	}
+}
+
 type PackLabel struct {
 	CompanyName string
 	ProductName string
 	KGText      string
 	BruttoText  string
 	EPC         string
+}
+
+type ArchiveBatchLabel struct {
+	SessionID string
+	ItemName  string
+	QtyText   string
+	BatchTime string
 }
 
 type PackLabelData struct {

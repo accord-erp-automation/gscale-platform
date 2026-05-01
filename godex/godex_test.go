@@ -2,6 +2,7 @@ package godex
 
 import (
 	"bytes"
+	"encoding/base64"
 	"image"
 	"image/color"
 	"strings"
@@ -23,6 +24,21 @@ func TestEncodeScanPayloadUsesURLPathShape(t *testing.T) {
 	want := "https://scan.wspace.sbs/L/ACCORD/ZARQAND+PRYANIKI/89/5/30A5"
 	if got != want {
 		t.Fatalf("payload = %q, want %q", got, want)
+	}
+}
+
+func TestEncodeArchiveBatchPayloadUsesArchivePathShape(t *testing.T) {
+	got := EncodeArchiveBatchPayload("sess-1", "Zor chips", "4.2", "01 May 2026 15:23")
+	if !strings.HasPrefix(got, DefaultArchiveQRBaseURL) {
+		t.Fatalf("payload = %q, want archive base url", got)
+	}
+	encoded := strings.TrimPrefix(got, DefaultArchiveQRBaseURL)
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if !strings.Contains(string(raw), "ARCHIVE") || !strings.Contains(string(raw), "sess-1") {
+		t.Fatalf("archive payload = %q", string(raw))
 	}
 }
 
@@ -96,6 +112,31 @@ func TestBuildPackLabelMatchesExpectedEZPLShape(t *testing.T) {
 	}
 	if !strings.HasPrefix(data.QRPayload, DefaultQRBaseURL) {
 		t.Fatalf("qr payload = %q", data.QRPayload)
+	}
+}
+
+func TestBuildArchiveBatchLabelContainsQRAndText(t *testing.T) {
+	commands := BuildArchiveBatchLabel(ArchiveBatchLabel{
+		SessionID: "sess-1",
+		ItemName:  "Zo'r chips 5D shashlik",
+		QtyText:   "4.2",
+		BatchTime: "01 May 2026 15:23",
+	}, DefaultArchiveLabelOptions())
+	joined := strings.Join(commands, "\n")
+	for _, want := range []string{
+		"BATCH INFO",
+		"ITEM: Zo'r chips",
+		"5D shashlik",
+		"QTY: 4.2 KG",
+		"TIME: 01 May 2026 15:23",
+		"^Q80,3",
+		"^W60",
+		"W240,32,2,1,L,8,8,",
+		DefaultArchiveQRBaseURL,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("archive commands missing %q:\n%s", want, joined)
+		}
 	}
 }
 

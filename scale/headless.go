@@ -48,6 +48,7 @@ func runHeadless(ctx context.Context, updates <-chan Reading, zebraUpdates <-cha
 		case now := <-ticker.C:
 			rs.refreshPrinterSnapshot(now)
 			rs.processPendingPrintRequest(now)
+			rs.processPendingArchivePrintRequest(now)
 		}
 	}
 }

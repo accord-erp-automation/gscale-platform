@@ -1,12 +1,13 @@
 package state
 
 type Snapshot struct {
-	Scale        ScaleSnapshot        `json:"scale"`
-	Zebra        ZebraSnapshot        `json:"zebra"`
-	Printer      PrinterSnapshot      `json:"printer"`
-	Batch        BatchSnapshot        `json:"batch"`
-	PrintRequest PrintRequestSnapshot `json:"print_request"`
-	UpdatedAt    string               `json:"updated_at,omitempty"`
+	Scale        ScaleSnapshot               `json:"scale"`
+	Zebra        ZebraSnapshot               `json:"zebra"`
+	Printer      PrinterSnapshot             `json:"printer"`
+	Batch        BatchSnapshot               `json:"batch"`
+	PrintRequest PrintRequestSnapshot        `json:"print_request"`
+	ArchivePrint ArchivePrintRequestSnapshot `json:"archive_print"`
+	UpdatedAt    string                      `json:"updated_at,omitempty"`
 }
 
 type ScaleSnapshot struct {
@@ -74,4 +75,19 @@ type PrintRequestSnapshot struct {
 	Error       string   `json:"error,omitempty"`
 	RequestedAt string   `json:"requested_at,omitempty"`
 	UpdatedAt   string   `json:"updated_at,omitempty"`
+}
+
+type ArchivePrintRequestSnapshot struct {
+	RequestID   string  `json:"request_id,omitempty"`
+	SessionID   string  `json:"session_id,omitempty"`
+	ItemCode    string  `json:"item_code,omitempty"`
+	ItemName    string  `json:"item_name,omitempty"`
+	TotalQty    float64 `json:"total_qty,omitempty"`
+	Unit        string  `json:"unit,omitempty"`
+	BatchTime   string  `json:"batch_time,omitempty"`
+	Printer     string  `json:"printer,omitempty"`
+	Status      string  `json:"status,omitempty"`
+	Error       string  `json:"error,omitempty"`
+	RequestedAt string  `json:"requested_at,omitempty"`
+	UpdatedAt   string  `json:"updated_at,omitempty"`
 }

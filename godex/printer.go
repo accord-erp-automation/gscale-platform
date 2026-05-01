@@ -149,3 +149,13 @@ func (p *Printer) PrintQR(payload string, options LabelOptions, center bool, qrB
 	time.Sleep(time.Second)
 	return p.Status()
 }
+
+func (p *Printer) PrintArchiveBatch(input ArchiveBatchLabel, options LabelOptions) (string, error) {
+	for _, command := range BuildArchiveBatchLabel(input, options) {
+		if _, err := p.Send(command, false, 120*time.Millisecond); err != nil {
+			return "", err
+		}
+	}
+	time.Sleep(time.Second)
+	return p.Status()
+}

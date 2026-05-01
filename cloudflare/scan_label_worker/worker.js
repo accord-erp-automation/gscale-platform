@@ -10,55 +10,98 @@ function decodePart(value) {
   return decodeURIComponent((value || "").replace(/\+/g, " "));
 }
 
-function renderLabel(pathname) {
-  const parts = pathname.replace(/^\/+|\/+$/g, "").split("/");
-  const payload = parts[0] && parts[0].toUpperCase() === "L" ? parts.slice(1) : parts;
+function decodePayloadLines(rawPayload) {
+  const payload = (rawPayload || "").trim();
+  if (!payload) {
+    return [];
+  }
 
-  let company = "";
-  let product = "";
-  let kg = "";
-  let brutto = "";
-  let epc = "";
-
-  if (payload.length === 1 && payload[0]) {
-    try {
-      const decoded = decodeBase64Url(payload[0]);
-      const items = decoded.split("\n");
-      company = items[0] || "";
-      product = items[1] || "";
-      kg = items[2] || "";
-      brutto = items[3] || "";
-      epc = items[4] || "";
-    } catch {
-      // Fall back to the legacy path-based layout below.
+  try {
+    const decoded = decodeBase64Url(payload).trim();
+    if (decoded) {
+      return decoded.split(/\r?\n/);
     }
+  } catch {
+    // Fall back to path-style payloads below.
   }
 
-  if (!company && payload.length >= 5) {
-    company = decodePart(payload[0]);
-    product = decodePart(payload[1]);
-    kg = decodePart(payload[2]);
-    brutto = decodePart(payload[3]);
-    epc = decodePart(payload[4]);
-  } else if (!company && payload.length >= 4) {
-    company = decodePart(payload[0]);
-    product = decodePart(payload[1]);
-    kg = decodePart(payload[2]);
-    epc = decodePart(payload[3]);
-    brutto = "5";
-  }
+  return payload.replace(/~/g, "|").split("|");
+}
 
-  if (!brutto) {
-    brutto = "5";
-  }
-
-  const body = [
+function renderPackLabel(company, product, kg, brutto, epc) {
+  return [
     `COMPANY: ${company}`,
     `MAHSULOT NOMI: ${product}`,
     `NETTO: ${kg} KG`,
     `BRUTTO: ${brutto} KG`,
     `EPC: ${epc}`,
   ].join("\n");
+}
+
+function renderArchiveLabel(item, qty, batchTime, session) {
+  return [
+    "BATCH INFO",
+    `ITEM: ${item}`,
+    `QTY: ${qty} KG`,
+    `TIME: ${batchTime}`,
+    `SESSION: ${session}`,
+  ].join("\n");
+}
+
+function renderLabel(pathname) {
+  const parts = pathname.replace(/^\/+|\/+$/g, "").split("/");
+  const prefix = parts[0] ? parts[0].toUpperCase() : "";
+  const payload = prefix === "L" || prefix === "A" ? parts.slice(1) : parts;
+
+  let decoded = [];
+  if (payload.length === 1 && payload[0]) {
+    try {
+      decoded = decodeBase64Url(payload[0]).split(/\r?\n/);
+    } catch {
+      decoded = [];
+    }
+  }
+  if (decoded.length === 0) {
+    decoded = payload.map((part) => decodePart(part));
+  }
+
+  let body = "";
+  const isArchive = prefix === "A" || decoded[0] === "ARCHIVE";
+  if (isArchive) {
+    if (decoded[0] === "ARCHIVE") {
+      body = renderArchiveLabel(
+        decoded[1] || "",
+        decoded[2] || "",
+        decoded[3] || "",
+        decoded[4] || ""
+      );
+    } else {
+      body = renderArchiveLabel(
+        decoded[0] || "",
+        decoded[1] || "",
+        decoded[2] || "",
+        decoded[3] || ""
+      );
+    }
+  } else {
+    if (decoded.length >= 5) {
+      body = renderPackLabel(
+        decoded[0] || "",
+        decoded[1] || "",
+        decoded[2] || "",
+        decoded[3] || "",
+        decoded[4] || ""
+      );
+    } else {
+      body = renderPackLabel(
+        decoded[0] || "",
+        decoded[1] || "",
+        decoded[2] || "",
+        "5",
+        decoded[3] || ""
+      );
+    }
+  }
 
   return `<!doctype html>
 <html lang="uz">

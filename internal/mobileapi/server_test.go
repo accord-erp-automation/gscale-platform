@@ -600,6 +600,73 @@ func TestArchiveEndpointReturnsBatchHistory(t *testing.T) {
 	}
 }
 
+func TestArchivePrintQueuesArchiveQrRequest(t *testing.T) {
+	t.Parallel()
+
+	stateDir, err := os.MkdirTemp("", "mobileapi-archive-print-state-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveDir, err := os.MkdirTemp("", "mobileapi-archive-print-file-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(stateDir)
+		_ = os.RemoveAll(archiveDir)
+	})
+
+	stateFile := stateDir + "/bridge_state.json"
+	archiveFile := archiveDir + "/archive.fb"
+	server := New(Config{
+		ServerName:      "gscale-dev",
+		BridgeStateFile: stateFile,
+		ArchiveFile:     archiveFile,
+	})
+	defer server.Close()
+
+	sessionID, err := server.archive.OpenSession("ITEM-001", "Green Tea", "Stores - A", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("open archive session: %v", err)
+	}
+	if err := server.archive.RecordPrint(7.25, "kg", "MAT-STE-0001", "EPC-1", time.Now().UTC()); err != nil {
+		t.Fatalf("record print: %v", err)
+	}
+	if err := server.archive.CloseSession(time.Now().UTC()); err != nil {
+		t.Fatalf("close archive session: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mobile/archive/print", bytes.NewBufferString(`{"session_id":"`+sessionID+`","printer":"zebra"}`))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("archive print status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	snap, err := bridgestate.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read bridge state: %v", err)
+	}
+	if snap.ArchivePrint.RequestID == "" {
+		t.Fatalf("archive print request id is empty: %+v", snap.ArchivePrint)
+	}
+	if snap.ArchivePrint.Status != "pending" {
+		t.Fatalf("archive print status = %q", snap.ArchivePrint.Status)
+	}
+	if snap.ArchivePrint.SessionID != sessionID {
+		t.Fatalf("archive session mismatch: %+v", snap.ArchivePrint)
+	}
+	if snap.ArchivePrint.Printer != "zebra" {
+		t.Fatalf("archive printer = %q", snap.ArchivePrint.Printer)
+	}
+	if snap.ArchivePrint.ItemName != "Green Tea" {
+		t.Fatalf("archive item name = %q", snap.ArchivePrint.ItemName)
+	}
+	if snap.ArchivePrint.TotalQty != 7.25 {
+		t.Fatalf("archive total qty = %.3f", snap.ArchivePrint.TotalQty)
+	}
+}
+
 func TestSetupStatusEndpoint(t *testing.T) {
 	t.Parallel()
 
