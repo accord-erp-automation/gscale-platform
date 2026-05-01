@@ -4,7 +4,7 @@
 `gscale-platform` is the orchestration and runtime repository of a mobile-first warehouse workflow that connects four operational concerns into one transaction chain:
 
 1. weight acquisition from a scale,
-2. RFID and label execution for Zebra printers,
+2. RFID and label execution for Zebra printers and GoDEX printers,
 3. ERPNext draft creation and submission,
 4. operator control through a mobile application.
 
@@ -54,7 +54,11 @@ gscale-mobile-app
         |
       scale worker -----------------------> Zebra printer / RFID
         |
+        +---------------------> GoDEX G500/G530 USB printer
+        |
         +---------------------> real scale or polygon simulator
+
+cloudflare/scan_label_worker ---------> scan.wspace.sbs QR landing page
 ```
 
 The `mobileapi` process exposes operator workflows. The `scale` process monitors the physical or simulated scale and fulfills print requests. The `bridge` state file acts as the shared transactional coordination surface. The `gscale-erp-read` companion repository supplies item and warehouse read models without exposing write privileges.
@@ -99,6 +103,7 @@ The scale worker is the device-facing execution engine. It:
 - detects stable positive readings,
 - consumes `print_request` instructions from bridge state,
 - executes Zebra encode and print operations when Zebra is enabled,
+- executes GoDEX pack-label operations when the GoDEX backend is selected,
 - reports device status back into shared state.
 
 ### `polygon`
@@ -138,6 +143,42 @@ The Telegram bot remains in the repository as an alternative operator interface.
 - direct device troubleshooting.
 
 The actual runtime print path, however, is executed by the `scale` worker.
+
+### `godex`
+`godex` owns the GoDEX G500/G530 pack-label flow. It keeps the direct USB
+printer path, EZPL command generation, and host-side QR/text rendering in one
+place so the production flow no longer depends on legacy Python scripts.
+
+### `cloudflare/scan_label_worker`
+This folder contains the stateless QR landing page used by the printed label.
+It receives the URL-shaped QR path and renders the human-readable label page.
+
+### `tools`
+`tools/release.sh` builds Linux release tarballs and `tools/scan_label_server.py`
+is a local stateless QR preview server for development.
+
+## Supported Hardware
+
+| Layer | Supported / verified | Notes |
+| --- | --- | --- |
+| Backend host | Linux `amd64` and `arm64` | Real USB/serial hardware access is implemented for Linux; other OSes are not the target runtime for physical devices. |
+| GoDEX printer backend | GoDEX G500 / G530 family | Direct USB printer path in `godex/`; the current USB VID/PID path targets GoDEX G500-class devices. |
+| Zebra printer backend | Zebra ZT411 RFID, ZT421 RFID | The Zebra path expects ZPL-compatible printers with RFID support where RFID encoding is used. |
+| Mobile client | Android phone or tablet | Flutter app; desktop/web is acceptable for development, but Android is the field target. |
+
+## Power And Host Requirements
+
+- Printer power comes from the printer’s own OEM power supply. The host PC does not power the printer.
+- Zebra ZT411 RFID official specs list an auto-switching `100-240V` power supply.
+- The GoDEX G500/G530 family uses its bundled printer-side PSU/adapter; the repository does not hardcode a wattage requirement.
+- Practical host recommendation: a low-power Linux mini-PC or industrial PC with USB host support, 1 to 2 CPU cores, and about 1 GB RAM is sufficient for the backend services. No GPU is required.
+- The important host requirement is stable USB/serial access, not raw compute.
+
+## Supported Printer Stack
+
+- Zebra printers are used for RFID encode + label workflows through ZPL and RFID commands.
+- GoDEX printers are used for label-only or pack-label workflows through EZPL and host-rendered QR/text graphics.
+- The mobile app selects the active printer type from the live bridge snapshot when the batch is idle, so operators do not need to guess which printer is attached.
 
 ## Runtime Contracts With Companion Repositories
 

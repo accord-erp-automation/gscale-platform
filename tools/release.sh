@@ -8,7 +8,7 @@ ARCHES=()
 
 usage() {
   cat <<'EOF'
-Usage: scripts/release.sh [options]
+Usage: tools/release.sh [options]
 
 Build Linux release tarballs for gscale-zebra.
 
@@ -19,8 +19,8 @@ Options:
   -h, --help      Show help
 
 Examples:
-  ./scripts/release.sh --arch amd64
-  ./scripts/release.sh --arch amd64 --arch arm64 --version v0.2.0
+  ./tools/release.sh --arch amd64
+  ./tools/release.sh --arch amd64 --arch arm64 --version v0.2.0
 EOF
 }
 

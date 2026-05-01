@@ -1,16 +1,27 @@
-# GoDEX G500
+# GoDEX G500 / G530
 
-Go implementation of the working Python GoDEX G500 print path from
-`scripts/godex_g500_direct_usb_test.py` and `scripts/godex_g500_pack_label.py`.
+`godex` is the Go implementation of the GoDEX pack-label flow that used to live
+in the legacy Python printer scripts.
 
-The production path here intentionally keeps the same core technology choices:
+## What It Supports
 
+- GoDEX `G500 / G530` family printers
 - direct USB bulk transfer to GoDEX `195f:0001`
-- EZPL commands
-- recovery/status commands such as `~S,STATUS`, `~S,SENSOR`, and `^AD`
+- EZPL command generation
 - host-side QR rendering
 - host-side Noto Sans text rendering into a monochrome BMP graphic
 - GoDEX graphic download with `~EB` and placement with `Y`
+
+## Platform Requirements
+
+- Linux only for real USB printer access
+- supported CPU architectures: `amd64`, `arm64`
+- printer power: use the printer’s own OEM adapter / PSU
+- host power: a low-power Linux PC or SBC is enough; the printer does the heavy
+  work
+
+The Go implementation does not hardcode a wattage requirement. In practice, the
+host only needs stable USB access and enough CPU to build the label graphics.
 
 ## Build
 
@@ -37,7 +48,7 @@ sudo ./godex-g500 \
   --epc 30A5FEA7709854D93C2B7593
 ```
 
-The Go CLI mirrors the Python script defaults:
+## Current Defaults
 
 - label length: `50mm`
 - label width: `50mm`
@@ -47,6 +58,12 @@ The Go CLI mirrors the Python script defaults:
 - QR box: `18mm`
 - text graphic name: `TEXTLBL`
 - QR graphic name: `QRLBL`
+- `--brutto` defaults to `5`
 
-The `--brutto` flag defaults to `5`, matching the current Python
-`godex_g500_pack_label.py` behavior.
+## Notes
+
+- QR payloads are URL-shaped and are generated host-side.
+- Human-readable label text is rendered on the host because direct printer text
+  rendering was not safe for the Uzbek glyphs used in production labels.
+- This package is the source of truth for the GoDEX production path; no Python
+  printer script is required anymore.

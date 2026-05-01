@@ -1,41 +1,36 @@
 # GScale Worker Context
 
-This file is a living handoff for the current GoDEX G500 label flow and the
-Cloudflare-backed scan page.
+This file is a living handoff for the current GoDEX G500/G530 label flow and
+the stateless scan landing page.
 
 ## What is working now
 
-- `scripts/godex_g500_pack_label.py` prints the pack label directly to the
-  GoDEX G500 printer over USB.
-- The QR on the label now points to a Cloudflare Worker on
-  `scan.wspace.sbs`.
+- `godex/` contains the production Go implementation of the GoDEX pack-label
+  printer flow.
+- The QR on the label points to a Cloudflare Worker on `scan.wspace.sbs`.
 - The QR payload is URL-shaped and camera-friendly:
-  - `HTTPS://SCAN.WSPACE.SBS/L/COMPANY/PRODUCT/KG/EPC`
+  - `HTTPS://SCAN.WSPACE.SBS/L/COMPANY/PRODUCT/KG/BRUTTO/EPC`
 - The scan page is stateless:
   - no database
   - no persistent storage
   - it only renders data already encoded in the QR URL
-- Human-readable label text is now rendered as a monochrome BMP graphic on the
-  host side and sent to the printer as a downloaded graphic, because the
-  printer text path was corrupting Uzbek Cyrillic / special glyphs.
+- Human-readable label text is rendered as a monochrome BMP graphic on the
+  host side in Go and sent to the printer as a downloaded graphic, because
+  printer text rendering was not safe for the Uzbek glyphs used in production.
 
-## Current live pieces
+## Current Live Pieces
 
-- Worker code: `scripts/scan_label_worker/worker.js`
-- Worker config: `scripts/scan_label_worker/wrangler.toml`
-- Print script: `scripts/godex_g500_pack_label.py`
-- Local scan renderer used during testing:
-  - `scripts/scan_label_server.py`
+- Worker code: `cloudflare/scan_label_worker/worker.js`
+- Worker config: `cloudflare/scan_label_worker/wrangler.toml`
+- Go printer code: `godex/`
+- Local scan renderer used during testing: `tools/scan_label_server.py`
 
-## Cloudflare routing
+## Cloudflare Routing
 
 - `scan.wspace.sbs/*` is routed to the Worker.
 - The Worker is deployed through Cloudflare Wrangler.
-- Live checks returned `HTTP 200` on:
-  - `https://scan.wspace.sbs/`
-  - `https://scan.wspace.sbs/L/ACCORD/ZARQAND+PRYANIKI+KLUBNIKA+230+GR/89/30A5FEA7709854D93C2B7593`
 
-## Important implementation details
+## Important Implementation Details
 
 - The QR payload is deliberately kept uppercase and alphanumeric-safe so
   mobile cameras are more likely to recognize it as a URL.
@@ -43,19 +38,20 @@ Cloudflare-backed scan page.
   - `COMPANY`
   - `MAHSULOT NOMI`
   - `NETTO`
+  - `BRUTTO`
   - `EPC`
-- Print text is no longer sent through GoDEX font commands. The Python host
-  renders the text block with Pillow/Noto Sans, downloads it as a BMP graphic
-  (`~EB`) and places it with `Y`.
-- This was the fix for broken Uzbek glyphs like `ў`, `ғ`, `қ`, and `ҳ`.
-- No Go backend changes are needed for this flow.
+- Print text is rendered on the host with Noto Sans fonts and downloaded to
+  the printer as a bitmap graphic.
+- No Go backend changes are needed for the scan worker itself.
 
-## Verified print command
+## Verified Print Path
 
 Example command that was tested successfully:
 
 ```bash
-.venv/bin/python3 scripts/godex_g500_pack_label.py \
+cd /home/wikki/storage/local.git/gscale-platform/godex
+GOWORK=off go run ./cmd/godex-g500 \
+  --pack-label \
   --company-name Accord \
   --product-name "Zo‘r pista 100gr ko‘k" \
   --kg 89 \
@@ -67,17 +63,16 @@ Observed printer status:
 - `status: 00,00000`
 - `final_status: 50,00001`
 
-## Notes for future edits
+## Notes for Future Edits
 
-- Keep changes confined to `scripts/` unless the user explicitly asks to touch
-  other parts of the repo.
-- Do not remove or rewrite unrelated worktree changes.
+- Keep printer-flow changes in `godex/` and `scale/` unless the user asks for a
+  wider refactor.
 - If QR scanning starts resolving as search instead of opening the page, first
   revisit the QR payload shape and the Worker route, not the printer layout.
 
-## Current mental model
+## Current Mental Model
 
-1. Printer script generates the label.
+1. Printer code generates the label.
 2. QR encodes a URL path with all data in it.
 3. Cloudflare Worker receives the request.
 4. Worker renders the visible label page.

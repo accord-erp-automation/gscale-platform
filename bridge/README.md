@@ -1,16 +1,22 @@
 # bridge
 
-`bridge` moduli scale, zebra va bot o'rtasidagi umumiy holatni bitta faylga yig'adi.
+`bridge` stores the shared runtime snapshot that ties scale, printer, batch,
+and print-request state together.
 
 Default state file:
+
 - `/tmp/gscale-zebra/bridge_state.json`
 
-Saqlanadigan bo'limlar:
-- `scale` - live qty, stable, error, source, port
-- `zebra` - oxirgi EPC, verify, printer holati
-- `batch` - bot batch active/stop holati
+Snapshot sections:
 
-Maqsad:
-- `qty.json` va `batch_state.json` kabi alohida fayllarni o'qib-yurishni kamaytirish
-- bot + scale avtomatizatsiyasini bitta kanalga to'plash
-- race/xatolik ehtimolini pasaytirish (atomic update + file lock)
+- `scale` - live qty, stable, error, source, port
+- `zebra` - last EPC, verify, printer state, RFID status
+- `printer` - live connected printer snapshot, kind, label, device paths
+- `batch` - active batch state and selected printer mode
+- `print_request` - pending or active print job status
+
+Why it exists:
+
+- reduces the need for multiple ad hoc JSON files
+- keeps the mobile API, scale worker, and print logic on the same snapshot
+- lowers the chance of race conditions by centralizing state updates

@@ -395,7 +395,7 @@ autostart-stop:
 	@systemctl is-enabled gscale-bot.service >/dev/null 2>&1 && sudo systemctl stop gscale-bot.service || true
 
 release:
-	./scripts/release.sh --arch amd64
+	./tools/release.sh --arch amd64
 
 release-all:
-	./scripts/release.sh --arch amd64 --arch arm64
+	./tools/release.sh --arch amd64 --arch arm64
