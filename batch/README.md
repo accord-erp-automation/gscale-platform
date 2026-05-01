@@ -1,8 +1,8 @@
 # Batch Labels
 
-`batch` is the Go implementation of the batch/archive label flow. It was
-cloned from the GoDEX printer stack so the archive path stays isolated from the
-main `godex` pack-label package.
+`batch` is the Go implementation of the archive/batch label flow. It is cloned
+from the GoDEX printer stack so the batch path stays isolated from the main
+`godex` pack-label package.
 
 ## What It Supports
 
@@ -11,9 +11,9 @@ main `godex` pack-label package.
 - EZPL command generation
 - host-side QR rendering
 - host-side Noto Sans text rendering into a monochrome BMP graphic
-- EZPL command generation for archive batch labels
-- archive batch labels that reuse the pack-label coordinate style and only
-  drop the company name, EPC barcode, and pack barcode
+- GoDEX graphic download with `~EB` and placement with `Y`
+- archive batch labels that follow the same coordinate style as the pack label
+  and omit company name, EPC, and barcode
 - archive batch labels with item name, brutto, netto, date, and QR history
 
 ## Compatibility Notes
@@ -74,13 +74,12 @@ sudo ./godex-g500 \
 
 ## Label Stock
 
-The archive batch layout now defaults to the same `60 × 80 mm` stock used by
-the existing archive flow, so the printed content lands on the same physical
-label and does not drift into the label seam.
+The archive batch layout defaults to the same `50 × 50 mm` stock as the
+standard pack label, so the printed content lands on the same physical label
+and does not drift into the label seam.
 
-If you need to fine-tune stock for a specific roll, pass
-`--label-length-mm 80 --label-width-mm 60` explicitly. The engine already
-supports both values through the CLI flags.
+If you need to fine-tune stock for a specific roll, pass the dimensions
+explicitly. The engine already supports both values through the CLI flags.
 
 ## Notes
 
