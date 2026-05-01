@@ -40,10 +40,11 @@ function renderPackLabel(company, product, kg, brutto, epc) {
 
 function renderArchiveLabel(item, qty, batchTime, session) {
   return [
-    "BATCH INFO",
+    "BATCH HISTORY",
     `ITEM: ${item}`,
-    `QTY: ${qty} KG`,
-    `TIME: ${batchTime}`,
+    `BRUTTO: ${qty} KG`,
+    `NETTO: ${qty} KG`,
+    `DATE: ${batchTime}`,
     `SESSION: ${session}`,
   ].join("\n");
 }

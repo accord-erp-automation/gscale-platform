@@ -45,21 +45,24 @@ func BuildArchiveBatchLabel(input ArchiveBatchLabel, options LabelOptions) []str
 	leftX := safeMarginDots
 	lineStep := MMDots(5.0, options.DPI)
 	qrBoxDots := MMDots(options.QRBoxMM, options.DPI)
-	qrRightGapDots := MMDots(4.0, options.DPI)
+	qrRightGapDots := MMDots(2.0, options.DPI)
 	qrX := maxInt(leftX, labelWidthDots-safeMarginDots-qrBoxDots-qrRightGapDots)
 	qrY := safeMarginDots
-	textWidthDots := maxInt(1, qrX-leftX-MMDots(5.0, options.DPI))
+	textWidthDots := maxInt(1, qrX-leftX-MMDots(2.0, options.DPI))
 	itemLines := wrapTextForEZPL(itemName, textWidthDots, options.DPI, 1, 14, 8)
 	if len(itemLines) == 0 {
 		itemLines = []string{"-"}
 	}
 
-	headerY := safeMarginDots
-	itemY := headerY + lineStep*2
-	qtyY := itemY + len(itemLines)*lineStep + lineStep
-	timeY := qtyY + lineStep
-	maxTimeY := maxInt(safeMarginDots+lineStep*4, labelLengthDots-safeMarginDots-MMDots(12.0, options.DPI))
-	timeY = minInt(timeY, maxTimeY)
+	itemY := safeMarginDots
+	bruttoY := itemY + len(itemLines)*lineStep + lineStep
+	nettoY := bruttoY + lineStep
+	dateY := nettoY + lineStep
+	maxDateY := maxInt(safeMarginDots+lineStep*4, labelLengthDots-safeMarginDots-MMDots(12.0, options.DPI))
+	dateY = minInt(dateY, maxDateY)
+	bruttoText := "BRUTTO: " + qtyText + " KG"
+	nettoText := "NETTO: " + qtyText + " KG"
+	dateText := "DATE: " + batchTime
 
 	commands := []string{
 		"~S,ESG",
@@ -73,16 +76,16 @@ func BuildArchiveBatchLabel(input ArchiveBatchLabel, options LabelOptions) []str
 		"^H10",
 		"^P1",
 		"^L",
-		fmt.Sprintf("AC,%d,%d,1,1,0,0,BATCH INFO", leftX, headerY),
 	}
 	for idx, line := range itemLines {
 		y := itemY + idx*lineStep
-		commands = append(commands, fmt.Sprintf("AC,%d,%d,1,1,0,0,ITEM: %s", leftX, y, line))
+		commands = append(commands, fmt.Sprintf("AC,%d,%d,1,1,0,0,%s", leftX, y, line))
 	}
 	commands = append(commands,
-		fmt.Sprintf("AC,%d,%d,1,1,0,0,QTY: %s KG", leftX, qtyY, qtyText),
-		fmt.Sprintf("AC,%d,%d,1,1,0,0,TIME: %s", leftX, timeY, batchTime),
-		fmt.Sprintf("W%d,%d,2,1,L,8,%d,%d,0", qrX, qrY, 8, len(qrPayload)),
+		fmt.Sprintf("AC,%d,%d,1,1,0,0,%s", leftX, bruttoY, bruttoText),
+		fmt.Sprintf("AC,%d,%d,1,1,0,0,%s", leftX, nettoY, nettoText),
+		fmt.Sprintf("AC,%d,%d,1,1,0,0,%s", leftX, dateY, dateText),
+		fmt.Sprintf("W%d,%d,2,1,L,4,%d,%d,0", qrX, qrY, 4, len(qrPayload)),
 		qrPayload,
 		"E",
 	)
@@ -134,7 +137,7 @@ func FormatArchiveBatchTime(raw string) string {
 }
 
 func FormatArchiveBatchQty(qty float64) string {
-	text := fmt.Sprintf("%.3f", qty)
+	text := fmt.Sprintf("%.1f", roundToOneDecimal(qty))
 	for strings.Contains(text, ".") && strings.HasSuffix(text, "0") {
 		text = strings.TrimSuffix(text, "0")
 	}

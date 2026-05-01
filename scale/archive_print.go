@@ -259,12 +259,11 @@ func buildArchiveBatchZPL(req bridgestate.ArchivePrintRequestSnapshot) (string, 
 	return "^XA\n" +
 		"^LH0,0\n" +
 		"^CI28\n" +
-		"^FO20,14^A0N,30,26^FB330,1,0,L,0\n" +
-		"^FDBATCH INFO^FS\n" +
-		fmt.Sprintf("^FO20,56^A0N,30,26^FB320,2,0,L,0\n^FDITEM: %s^FS\n", item) +
-		fmt.Sprintf("^FO20,132^A0N,28,24^FB320,1,0,L,0\n^FDQTY: %s KG^FS\n", qtyText) +
-		fmt.Sprintf("^FO20,172^A0N,24,20^FB320,2,0,L,0\n^FDTIME: %s^FS\n", batchTime) +
-		fmt.Sprintf("^FO360,18^BQN,2,8\n^FDLA,%s^FS\n", qrPayload) +
+		fmt.Sprintf("^FO20,20^A0N,30,26^FB310,2,0,L,0\n^FD%s^FS\n", item) +
+		fmt.Sprintf("^FO20,112^A0N,28,24^FB310,1,0,L,0\n^FDBRUTTO: %s KG^FS\n", qtyText) +
+		fmt.Sprintf("^FO20,152^A0N,28,24^FB310,1,0,L,0\n^FDNETTO: %s KG^FS\n", qtyText) +
+		fmt.Sprintf("^FO20,196^A0N,24,20^FB310,2,0,L,0\n^FDDATE: %s^FS\n", batchTime) +
+		fmt.Sprintf("^FO364,20^BQN,2,4\n^FDLA,%s^FS\n", qrPayload) +
 		"^PQ1\n" +
 		"^XZ\n", nil
 }
