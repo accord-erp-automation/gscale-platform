@@ -713,14 +713,6 @@ func (s *Server) handleBatchManualPrint(w http.ResponseWriter, r *http.Request) 
 	}
 	grossQty := req.ManualQtyKG
 	if grossQty <= 0 {
-		snap, err := s.readBatchSnapshot()
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-			return
-		}
-		grossQty = snap.ManualQtyKG
-	}
-	if grossQty <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "manual_qty_required"})
 		return
 	}
