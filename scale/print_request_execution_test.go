@@ -103,3 +103,27 @@ func TestFormatPrintWeightLabels_WithTare(t *testing.T) {
 		t.Fatalf("godex labels mismatch: %+v", godex)
 	}
 }
+
+func TestFormatPrintWeightLabels_WithoutTareDuplicatesQty(t *testing.T) {
+	qty := 3.2
+	req := bridgestate.PrintRequestSnapshot{
+		Qty:  &qty,
+		Unit: "kg",
+	}
+
+	got := formatPrintWeightLabels(req)
+	if got.HasTare {
+		t.Fatal("expected no tare labels")
+	}
+	if got.Netto != "3.2 kg" {
+		t.Fatalf("netto mismatch: %q", got.Netto)
+	}
+	if got.Brutto != "3.2 kg" {
+		t.Fatalf("brutto mismatch: %q", got.Brutto)
+	}
+
+	godex := formatGoDEXWeightLabels(req, "5kg")
+	if godex.Netto != "3.2" || godex.Brutto != "3.2" {
+		t.Fatalf("godex labels mismatch: %+v", godex)
+	}
+}

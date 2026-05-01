@@ -96,13 +96,6 @@ func formatLabelQty(qty *float64, unit string) string {
 	return fmt.Sprintf("%s %s", formatRoundedQty(*qty), u)
 }
 
-func formatGoDEXQty(qty *float64, unit string) string {
-	if qty == nil {
-		return "-"
-	}
-	return formatRoundedQty(*qty)
-}
-
 type printWeightLabels struct {
 	Netto   string
 	Brutto  string
@@ -116,7 +109,14 @@ func formatPrintWeightLabels(req bridgestate.PrintRequestSnapshot) printWeightLa
 		grossQty = req.Qty
 	}
 	if !req.Tare || req.TareKG <= 0 || grossQty == nil {
-		return printWeightLabels{Netto: formatLabelQty(req.Qty, req.Unit)}
+		label := formatLabelQty(grossQty, req.Unit)
+		if grossQty == nil {
+			label = formatLabelQty(req.Qty, req.Unit)
+		}
+		return printWeightLabels{
+			Netto:  label,
+			Brutto: label,
+		}
 	}
 	if netQty == nil {
 		net := *grossQty - req.TareKG
@@ -141,9 +141,16 @@ func formatGoDEXWeightLabels(req bridgestate.PrintRequestSnapshot, defaultBrutto
 			HasTare: true,
 		}
 	}
+	if strings.TrimSpace(labels.Netto) == "" {
+		fallback := strings.TrimSpace(defaultBrutto)
+		return printWeightLabels{
+			Netto:  fallback,
+			Brutto: fallback,
+		}
+	}
 	return printWeightLabels{
-		Netto:  formatGoDEXQty(req.Qty, req.Unit),
-		Brutto: strings.TrimSpace(defaultBrutto),
+		Netto:  stripKGUnit(labels.Netto),
+		Brutto: stripKGUnit(labels.Brutto),
 	}
 }
 

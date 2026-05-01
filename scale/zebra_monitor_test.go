@@ -95,6 +95,23 @@ func TestBuildLabelOnlyPrintCommand_WithTareShowsNettoAndBrutto(t *testing.T) {
 	}
 }
 
+func TestBuildLabelOnlyPrintCommand_WithoutTareShowsSameNettoAndBrutto(t *testing.T) {
+	stream, err := buildLabelOnlyPrintCommandWithWeights("3034ABCDEF1234567890AABB", "3.2 kg", "3.2 kg", "GREEN TEA")
+	if err != nil {
+		t.Fatalf("buildLabelOnlyPrintCommandWithWeights error: %v", err)
+	}
+
+	if !strings.Contains(stream, "^FDNETTO: 3.2 kg^FS") {
+		t.Fatalf("netto line missing: %s", stream)
+	}
+	if !strings.Contains(stream, "^FDBRUTTO: 3.2 kg^FS") {
+		t.Fatalf("brutto line missing: %s", stream)
+	}
+	if strings.Contains(stream, "^FDVAZNI:") {
+		t.Fatalf("no-tare label should not use generic VAZNI line: %s", stream)
+	}
+}
+
 func TestNormalizeEPC_RejectsNonWordAligned(t *testing.T) {
 	// 22 belgi: 22%4=2 — rad etilishi kerak
 	_, err := normalizeEPC("3034ABCDEF1234567890AA")
