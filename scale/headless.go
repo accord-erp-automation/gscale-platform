@@ -16,6 +16,8 @@ func runHeadless(ctx context.Context, updates <-chan Reading, zebraUpdates <-cha
 		status.Render()
 	}
 
+	rs.refreshPrinterSnapshot(time.Now())
+
 	ticker := time.NewTicker(350 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -44,6 +46,7 @@ func runHeadless(ctx context.Context, updates <-chan Reading, zebraUpdates <-cha
 				status.SetZebra(zebraStatusLine(st, zebraPreferred))
 			}
 		case now := <-ticker.C:
+			rs.refreshPrinterSnapshot(now)
 			rs.processPendingPrintRequest(now)
 		}
 	}

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func writeBridgeStateSnapshot(store *bridgestate.Store, rd Reading, zebra ZebraStatus) error {
+func writeBridgeStateSnapshot(store *bridgestate.Store, rd Reading, zebra ZebraStatus, printer bridgestate.PrinterSnapshot) error {
 	if store == nil {
 		return nil
 	}
@@ -51,5 +51,6 @@ func writeBridgeStateSnapshot(store *bridgestate.Store, rd Reading, zebra ZebraS
 	return store.Update(func(s *bridgestate.Snapshot) {
 		s.Scale = scaleSnap
 		s.Zebra = zebraSnap
+		s.Printer = printer
 	})
 }
