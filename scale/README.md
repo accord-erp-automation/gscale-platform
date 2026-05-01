@@ -15,7 +15,11 @@ Supported printer families:
   repository.
 - Verified Zebra families in the current docs and code path: `ZT411 RFID`,
   `ZT421 RFID`.
+- Likely-compatible with testing: other Zebra ZT4xx RFID / ZPL-based industrial
+  printers that expose the same command surface.
 - GoDEX `G500 / G530` family through the GoDEX USB backend.
+- Likely-compatible with testing: nearby GoDEX `G500+ / G530+` and other EZPL
+  printers that keep the same USB transport shape.
 
 Supported host architectures:
 

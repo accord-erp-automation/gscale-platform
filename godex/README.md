@@ -12,6 +12,14 @@ in the legacy Python printer scripts.
 - host-side Noto Sans text rendering into a monochrome BMP graphic
 - GoDEX graphic download with `~EB` and placement with `Y`
 
+## Compatibility Notes
+
+- Verified: GoDEX `G500`, `G530`
+- Likely-compatible with testing: nearby `G500+ / G530+` models and other
+  GoDEX printers that expose the same EZPL + USB transport shape
+- Not promised without test: GoDEX models that need a different transport,
+  vendor ID, or command dialect
+
 ## Platform Requirements
 
 - Linux only for real USB printer access
