@@ -57,7 +57,13 @@ func BuildArchiveBatchLabel(input ArchiveBatchLabel, options LabelOptions) (Arch
 
 	productFirstLineWidthDots := maxInt(1, labelWidthDots-leftX)
 	productRestLineWidthDots := maxInt(1, qrX-leftX-MMDots(5.0, options.DPI))
-	itemLines := wrapPrefixedTextPixels("", itemName, fonts.Bold21, productFirstLineWidthDots, productRestLineWidthDots)
+	itemLines := wrapPrefixedTextPixels(
+		"MAHSULOT NOMI:",
+		itemName,
+		fonts.Bold21,
+		productFirstLineWidthDots,
+		productRestLineWidthDots,
+	)
 	if len(itemLines) == 0 {
 		itemLines = []string{"-"}
 	}
@@ -85,11 +91,11 @@ func BuildArchiveBatchLabel(input ArchiveBatchLabel, options LabelOptions) (Arch
 		qtyY,
 		bruttoY,
 		dateY,
-		"",
+		"DATE: "+batchTime,
 		itemLines,
 		"NETTO: "+qtyText+" KG",
 		"BRUTTO: "+qtyText+" KG",
-		"DATE: "+batchTime,
+		"",
 		fonts,
 	)
 	if err != nil {
