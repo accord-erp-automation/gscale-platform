@@ -335,6 +335,10 @@ func (c workflowBridgeClient) WaitForNextCycle(ctx context.Context, timeout, pol
 		pollInterval = 220 * time.Millisecond
 	}
 
+	// Wait until the scale is released (near zero) before allowing the next cycle.
+	// This avoids treating the same stable gross weight as a new item.
+	const releaseThresholdKg = 0.05
+
 	deadline := time.Now().Add(timeout)
 	for {
 		if time.Now().After(deadline) {
@@ -356,10 +360,7 @@ func (c workflowBridgeClient) WaitForNextCycle(ctx context.Context, timeout, pol
 			time.Sleep(pollInterval)
 			continue
 		}
-		if scale.Weight == nil || *scale.Weight <= 0 {
-			return nil
-		}
-		if lastQty > 0 && math.Abs(*scale.Weight-lastQty) > 0.005 {
+		if scale.Weight == nil || *scale.Weight <= releaseThresholdKg {
 			return nil
 		}
 
