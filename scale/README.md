@@ -62,6 +62,9 @@ Printer power:
 - Suitable for label-only or pack-label flows.
 - The current code path targets the GoDEX `G500` USB device family.
 - Direct USB communication uses the GoDEX `195f:0001` device path.
+- The documented production label stock for this flow is `60 × 80 mm`.
+- `--label-length-mm` and `--label-width-mm` can be tuned if the physical
+  stock orientation differs.
 
 ## Print Request Rules
 

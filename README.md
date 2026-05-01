@@ -180,6 +180,15 @@ is a local stateless QR preview server for development.
 - GoDEX printers are used for label-only or pack-label workflows through EZPL and host-rendered QR/text graphics.
 - The mobile app selects the active printer type from the live bridge snapshot when the batch is idle, so operators do not need to guess which printer is attached.
 
+## Label Stock
+
+- The current GoDEX pack-label command is tuned for `60 × 80 mm` label paper.
+- The GoDEX CLI still supports label-size overrides through `--label-length-mm`
+  and `--label-width-mm`.
+- In practice, the production print command is meant to be adjusted to the
+  exact stock being used, but `60 × 80 mm` is the documented target format for
+  the current label layout.
+
 ## Runtime Contracts With Companion Repositories
 
 ### Contract With `gscale-erp-read`

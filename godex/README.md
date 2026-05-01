@@ -60,6 +60,26 @@ sudo ./godex-g500 \
 - QR graphic name: `QRLBL`
 - `--brutto` defaults to `5`
 
+## Label Stock
+
+The current production layout is documented for `60 × 80 mm` label paper.
+When you need to match that stock exactly, pass the dimensions explicitly:
+
+```bash
+GOWORK=off go run ./cmd/godex-g500 \
+  --pack-label \
+  --label-length-mm 80 \
+  --label-width-mm 60 \
+  --company-name Accord \
+  --product-name "Zo'r pista 100gr kok" \
+  --kg 89 \
+  --epc 30A5FEA7709854D93C2B7593
+```
+
+If your printer stock is rotated differently, swap width and length to match
+the physical paper orientation. The engine already supports both values through
+the CLI flags.
+
 ## Notes
 
 - QR payloads are URL-shaped and are generated host-side.
