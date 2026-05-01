@@ -15,6 +15,7 @@ APP_GROUP ?= $(shell id -gn)
 MOBILE_API_CANDIDATE_PORTS ?= 39117,41257,43391,45533,47681
 MOBILE_API_BIND_HOST ?= 0.0.0.0
 MOBILE_API_SERVER_NAME ?= $(shell hostname)
+MOBILE_API_DEV_ERP_WRITE ?=
 RUN_DEV_CORE_ENV ?= /tmp/gscale-zebra/mobileapi-dev.core.env
 RUN_DEV_PID_FILE ?= /tmp/gscale-zebra/run-dev.pid
 CURL ?= curl
@@ -38,7 +39,7 @@ help:
 	@echo "  make run-bot    - faqat telegram bot"
 	@echo "  make run-polygon - real qurilmasiz polygon simulator"
 	@echo "  make run-test   - polygon + scale worker (qurilmasiz core test)"
-	@echo "  make run-dev    - fresh backend/core dev stack: stops local gscale systemd services, then polygon + mobileapi + scale (no erp-read)"
+	@echo "  make run-dev    - fresh backend/core dev stack: stops local gscale systemd services, then polygon + mobileapi + scale (ERPNext write is real if configured)"
 	@echo "  make run-mobile - Flutter mobile client (default: auto device)"
 	@echo "  make run-mobile-android - Flutter mobile client Android uchun"
 	@echo "  make run-mobile-linux   - Flutter mobile client Linux desktop uchun"
@@ -272,7 +273,7 @@ run-dev: fresh-bridge-state
 		sed -n '1,160p' /tmp/gscale-zebra/polygon.log; \
 		exit 1; \
 	fi; \
-	env MOBILE_API_ADDR="$$MOBILE_API_ADDR_RESOLVED" MOBILE_API_CANDIDATE_PORTS="$(MOBILE_API_CANDIDATE_PORTS)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" MOBILE_API_SETUP_FILE="$$DEV_CORE_ENV_FILE" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT" MOBILE_API_DEV_ERP_WRITE=1 "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
+	env MOBILE_API_ADDR="$$MOBILE_API_ADDR_RESOLVED" MOBILE_API_CANDIDATE_PORTS="$(MOBILE_API_CANDIDATE_PORTS)" MOBILE_API_SERVER_NAME="$(MOBILE_API_SERVER_NAME)" MOBILE_API_SETUP_FILE="$$DEV_CORE_ENV_FILE" BRIDGE_STATE_FILE="$(BRIDGE_STATE_FILE)" POLYGON_URL="http://$$POLYGON_CONNECT_HOST:$$POLYGON_PORT" MOBILE_API_DEV_ERP_WRITE="$(MOBILE_API_DEV_ERP_WRITE)" "$(MOBILEAPI_DEV_BIN)" >/tmp/gscale-zebra/mobileapi.log 2>&1 & \
 	MOBILEAPI_PID=$$!; \
 	echo "$$MOBILEAPI_PID" >/tmp/gscale-zebra/mobileapi.pid; \
 	for i in $$(seq 1 40); do \

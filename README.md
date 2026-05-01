@@ -262,6 +262,8 @@ The mobile API also supports a runtime-local setup file, used heavily in develop
 ### Why `run-dev` Must Start Clean
 The development stack can behave unpredictably if stale `polygon`, `mobileapi`, or `scale` processes remain alive. For that reason, `run-dev` now performs an aggressive cleanup pass before starting a new stack. This prevents duplicated fake scale cycles and duplicated print-request handling.
 
+`run-dev` uses the real ERPNext write configuration from `config/core.env` when it is present, so batch actions can create and submit actual ERP drafts during local testing. If you explicitly want simulated writes for a smoke test, use `make run-dev MOBILE_API_DEV_ERP_WRITE=1`.
+
 ### Why `gscale-erp-read` Is Not Embedded Into `run-dev`
 The ERP read service is modeled as a companion service, not as an implementation detail of `run-dev`. This mirrors production architecture more accurately and keeps the boundary between runtime orchestration and ERP-side read access explicit.
 
