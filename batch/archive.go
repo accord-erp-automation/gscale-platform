@@ -91,11 +91,11 @@ func BuildArchiveBatchLabel(input ArchiveBatchLabel, options LabelOptions) (Arch
 		qtyY,
 		bruttoY,
 		dateY,
-		"DATE: "+batchTime,
+		"",
 		itemLines,
 		"NETTO: "+qtyText+" KG",
 		"BRUTTO: "+qtyText+" KG",
-		"",
+		"DATE: "+batchTime,
 		fonts,
 	)
 	if err != nil {
