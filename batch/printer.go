@@ -158,12 +158,6 @@ func (p *Printer) PrintArchiveBatch(input ArchiveBatchLabel, options LabelOption
 	if err := p.SetBuzzer(false); err != nil {
 		return "", fmt.Errorf("disable buzzer: %w", err)
 	}
-	if err := p.DownloadGraphic(TextGraphicName, data.TextGraphicBMP); err != nil {
-		return "", fmt.Errorf("download text graphic: %w", err)
-	}
-	if err := p.DownloadGraphic(QRGraphicName, data.QRGraphicBMP); err != nil {
-		return "", fmt.Errorf("download qr graphic: %w", err)
-	}
 	for idx, command := range data.Commands {
 		if _, err := p.Send(command, false, 120*time.Millisecond); err != nil {
 			return "", fmt.Errorf("send archive print command %d: %w", idx+1, err)

@@ -127,26 +127,19 @@ func TestBuildArchiveBatchLabelContainsQRAndText(t *testing.T) {
 	}
 	joined := strings.Join(data.Commands, "\n")
 	for _, want := range []string{
-		"^Q50,3",
-		"^W50",
-		"Y0,0,TEXTLBL",
-		"QRLBL",
+		"^Q80,3",
+		"^W60",
+		"AC,",
 		"E",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("archive commands missing %q:\n%s", want, joined)
 		}
 	}
-	for _, notWant := range []string{"COMPANY:", "EPC:", "BATCH INFO", "BRUTTO:", "NETTO:", "DATE:"} {
+	for _, notWant := range []string{"COMPANY:", "EPC:", "BATCH INFO", "BA,", "~EB,", "TEXTLBL", "QRLBL"} {
 		if strings.Contains(joined, notWant) {
 			t.Fatalf("archive commands unexpectedly contain %q:\n%s", notWant, joined)
 		}
-	}
-	if !bytes.HasPrefix(data.TextGraphicBMP, []byte("BM")) {
-		t.Fatalf("archive text graphic is not BMP")
-	}
-	if !bytes.HasPrefix(data.QRGraphicBMP, []byte("BM")) {
-		t.Fatalf("archive qr graphic is not BMP")
 	}
 	if !strings.HasPrefix(data.QRPayload, DefaultArchiveQRBaseURL) {
 		t.Fatalf("archive qr payload = %q, want archive base url", data.QRPayload)
@@ -203,17 +196,14 @@ func TestPrinterPrintArchiveBatchSendsGraphicsBeforeCommands(t *testing.T) {
 		t.Fatalf("PrintArchiveBatch: %v", err)
 	}
 	joined := strings.Join(ft.commands, "\n")
-	if !strings.Contains(joined, "~EB,TEXTLBL,") || !strings.Contains(joined, "~EB,QRLBL,") {
-		t.Fatalf("archive graphic downloads missing:\n%s", joined)
+	if strings.Contains(joined, "~EB,") {
+		t.Fatalf("archive should not download graphics:\n%s", joined)
 	}
-	if buzzer := strings.Index(joined, "^XSET,BUZZER,0"); buzzer < 0 || buzzer > strings.Index(joined, "~EB,TEXTLBL,") {
-		t.Fatalf("archive buzzer was not disabled before graphic download:\n%s", joined)
+	if buzzer := strings.Index(joined, "^XSET,BUZZER,0"); buzzer < 0 || buzzer > strings.Index(joined, "^Q80,3") {
+		t.Fatalf("archive buzzer was not disabled before label commands:\n%s", joined)
 	}
-	if firstY := strings.Index(joined, "Y0,0,TEXTLBL"); firstY < strings.Index(joined, "~EB,QRLBL,") {
-		t.Fatalf("archive label command sent before graphic download:\n%s", joined)
-	}
-	if len(ft.rawWrites) != 2 {
-		t.Fatalf("archive raw writes = %d, want 2", len(ft.rawWrites))
+	if len(ft.rawWrites) != 0 {
+		t.Fatalf("archive raw writes = %d, want 0", len(ft.rawWrites))
 	}
 }
 
