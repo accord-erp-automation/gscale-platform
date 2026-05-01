@@ -77,7 +77,7 @@ func TestWritePrintRequestStatus_UpdatesMatchingEPCOnly(t *testing.T) {
 }
 
 func TestFormatPrintWeightLabels_WithTare(t *testing.T) {
-	net := 4.22
+	net := 1.892
 	gross := 5.0
 	req := bridgestate.PrintRequestSnapshot{
 		Qty:      &net,
@@ -91,7 +91,7 @@ func TestFormatPrintWeightLabels_WithTare(t *testing.T) {
 	if !got.HasTare {
 		t.Fatal("expected tare labels")
 	}
-	if got.Netto != "4.22 kg" {
+	if got.Netto != "1.9 kg" {
 		t.Fatalf("netto mismatch: %q", got.Netto)
 	}
 	if got.Brutto != "5 kg" {
@@ -99,7 +99,7 @@ func TestFormatPrintWeightLabels_WithTare(t *testing.T) {
 	}
 
 	godex := formatGoDEXWeightLabels(req, "5kg")
-	if godex.Netto != "4.22" || godex.Brutto != "5" {
+	if godex.Netto != "1.9" || godex.Brutto != "5" {
 		t.Fatalf("godex labels mismatch: %+v", godex)
 	}
 }

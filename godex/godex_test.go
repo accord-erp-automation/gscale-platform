@@ -26,6 +26,18 @@ func TestEncodeScanPayloadUsesURLPathShape(t *testing.T) {
 	}
 }
 
+func TestNormalizeKGValueRoundsToOneDecimal(t *testing.T) {
+	got := NormalizeKGValue("1.892 kg")
+	if got != "1.9" {
+		t.Fatalf("NormalizeKGValue = %q, want %q", got, "1.9")
+	}
+
+	got = NormalizeKGValue("5 kg")
+	if got != "5" {
+		t.Fatalf("NormalizeKGValue integer = %q, want %q", got, "5")
+	}
+}
+
 func TestEncodeMonoBMPWritesOneBitBMP(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 9, 2))
 	for y := 0; y < 2; y++ {
