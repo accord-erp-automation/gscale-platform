@@ -162,8 +162,8 @@ is a local stateless QR preview server for development.
 | Layer | Supported / verified | Notes |
 | --- | --- | --- |
 | Backend host | Linux `amd64` and `arm64` | Real USB/serial hardware access is implemented for Linux; other OSes are not the target runtime for physical devices. |
-| GoDEX printer backend | GoDEX G500 / G530 family | Direct USB printer path in `godex/`; the current USB VID/PID path targets GoDEX G500-class devices. |
-| Zebra printer backend | Zebra ZT411 RFID, ZT421 RFID | The Zebra path expects ZPL-compatible printers with RFID support where RFID encoding is used. |
+| GoDEX printer backend | Verified: G500 / G530. Likely-compatible: nearby G500+/G530+ and other EZPL-based GoDEX models with matching USB behavior, after test. | Direct USB printer path in `godex/`; the current USB VID/PID path targets GoDEX G500-class devices. |
+| Zebra printer backend | Verified: ZT411 RFID, ZT421 RFID. Likely-compatible: nearby ZT4xx RFID / ZPL-based Zebra industrial printers that expose the same command surface, after test. | The Zebra path expects ZPL-compatible printers with RFID support where RFID encoding is used. |
 | Mobile client | Android phone or tablet | Flutter app; desktop/web is acceptable for development, but Android is the field target. |
 
 ## Power And Host Requirements
@@ -179,6 +179,13 @@ is a local stateless QR preview server for development.
 - Zebra printers are used for RFID encode + label workflows through ZPL and RFID commands.
 - GoDEX printers are used for label-only or pack-label workflows through EZPL and host-rendered QR/text graphics.
 - The mobile app selects the active printer type from the live bridge snapshot when the batch is idle, so operators do not need to guess which printer is attached.
+
+## Compatibility Policy
+
+- `Verified` means the printer family is already coded against and documented in this repo.
+- `Likely-compatible` means the printer family is close enough in protocol shape that it may work, but it still needs a real test run before we call it supported.
+- For Zebra, the code path is centered on ZPL and RFID-capable industrial printers.
+- For GoDEX, the code path is centered on EZPL and the G500-style USB transport currently used by the GoDEX backend.
 
 ## Label Stock
 
