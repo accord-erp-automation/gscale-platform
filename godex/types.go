@@ -71,7 +71,7 @@ func DefaultArchiveLabelOptions() LabelOptions {
 		LabelWidthMM:  60,
 		DPI:           203,
 		SafeMarginMM:  4.0,
-		QRBoxMM:       22.0,
+		QRBoxMM:       14.0,
 		RegularFont:   DefaultNotoSansRegular,
 		BoldFont:      DefaultNotoSansBold,
 	}

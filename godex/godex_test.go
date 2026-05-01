@@ -124,19 +124,34 @@ func TestBuildArchiveBatchLabelContainsQRAndText(t *testing.T) {
 	}, DefaultArchiveLabelOptions())
 	joined := strings.Join(commands, "\n")
 	for _, want := range []string{
-		"BATCH INFO",
-		"ITEM: Zo'r chips",
-		"5D shashlik",
-		"QTY: 4.2 KG",
-		"TIME: 01 May 2026 15:23",
+		"Zo'r chips",
+		"5D",
+		"shashlik",
+		"BRUTTO: 4.2 KG",
+		"NETTO: 4.2 KG",
+		"DATE: 01 May 2026 15:23",
 		"^Q80,3",
 		"^W60",
-		"W240,32,2,1,L,8,8,",
+		"W320,32,2,1,L,4,4,",
 		DefaultArchiveQRBaseURL,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("archive commands missing %q:\n%s", want, joined)
 		}
+	}
+	for _, notWant := range []string{"COMPANY:", "EPC:", "BATCH INFO"} {
+		if strings.Contains(joined, notWant) {
+			t.Fatalf("archive commands unexpectedly contain %q:\n%s", notWant, joined)
+		}
+	}
+}
+
+func TestFormatArchiveBatchQtyRoundsToOneDecimal(t *testing.T) {
+	if got := FormatArchiveBatchQty(7.25); got != "7.3" {
+		t.Fatalf("FormatArchiveBatchQty = %q, want %q", got, "7.3")
+	}
+	if got := FormatArchiveBatchQty(5); got != "5" {
+		t.Fatalf("FormatArchiveBatchQty integer = %q, want %q", got, "5")
 	}
 }
 

@@ -57,10 +57,11 @@ def render_archive_label(parts: list[str]) -> bytes:
     session = parts[4] if len(parts) > 4 else ""
 
     lines = [
-        "BATCH INFO",
+        "BATCH HISTORY",
         f"ITEM: {item}",
-        f"QTY: {qty} KG",
-        f"TIME: {batch_time}",
+        f"BRUTTO: {qty} KG",
+        f"NETTO: {qty} KG",
+        f"DATE: {batch_time}",
         f"SESSION: {session}",
     ]
     body = "\n".join(html.escape(line) for line in lines)
@@ -80,10 +81,11 @@ if (raw) {{
   const values = raw.split("~").map(v => decodeURIComponent(v.replace(/\\+/g, " ")));
   if (values[0] === "ARCHIVE") {{
     document.body.textContent = [
-      "BATCH INFO",
+      "BATCH HISTORY",
       `ITEM: ${{values[1] || ""}}`,
-      `QTY: ${{values[2] || ""}} KG`,
-      `TIME: ${{values[3] || ""}}`,
+      `BRUTTO: ${{values[2] || ""}} KG`,
+      `NETTO: ${{values[2] || ""}} KG`,
+      `DATE: ${{values[3] || ""}}`,
       `SESSION: ${{values[4] || ""}}`,
     ].join("\\n");
   }} else {{
