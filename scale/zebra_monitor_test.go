@@ -114,9 +114,9 @@ func TestNormalizeEPC_Accepts24Char(t *testing.T) {
 }
 
 func TestFormatLabelQty(t *testing.T) {
-	w := 2.3456
+	w := 1.892
 	got := formatLabelQty(&w, "kg")
-	if got != "2.346 kg" {
+	if got != "1.9 kg" {
 		t.Fatalf("formatLabelQty mismatch: got=%q", got)
 	}
 

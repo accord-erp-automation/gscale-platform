@@ -1,7 +1,9 @@
 package godex
 
 import (
+	"math"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"golang.org/x/text/unicode/norm"
@@ -22,7 +24,27 @@ func NormalizeKGValue(text string) string {
 	case strings.HasSuffix(lowered, "kg"):
 		value = strings.TrimSpace(value[:len(value)-2])
 	}
+	if rounded, ok := roundKGText(value); ok {
+		return rounded
+	}
 	return value
+}
+
+func roundKGText(text string) (string, bool) {
+	value := strings.TrimSpace(text)
+	if value == "" {
+		return "", false
+	}
+	value = strings.ReplaceAll(value, ",", ".")
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return "", false
+	}
+	return strconv.FormatFloat(roundToOneDecimal(parsed), 'f', -1, 64), true
+}
+
+func roundToOneDecimal(value float64) float64 {
+	return math.Round(value*10) / 10
 }
 
 func EncodeScanPayload(companyName, productName, kgText, bruttoText, epc string) string {

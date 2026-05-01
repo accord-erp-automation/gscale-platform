@@ -3,6 +3,7 @@ package main
 import (
 	bridgestate "bridge/state"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -92,14 +93,14 @@ func formatLabelQty(qty *float64, unit string) string {
 	if qty == nil {
 		return "- " + u
 	}
-	return fmt.Sprintf("%.3f %s", *qty, u)
+	return fmt.Sprintf("%s %s", formatRoundedQty(*qty), u)
 }
 
 func formatGoDEXQty(qty *float64, unit string) string {
 	if qty == nil {
 		return "-"
 	}
-	return strconv.FormatFloat(*qty, 'f', -1, 64)
+	return formatRoundedQty(*qty)
 }
 
 type printWeightLabels struct {
@@ -151,7 +152,12 @@ func formatTrimmedQty(qty float64, unit string) string {
 	if u == "" {
 		u = "kg"
 	}
-	return strconv.FormatFloat(qty, 'f', -1, 64) + " " + u
+	return formatRoundedQty(qty) + " " + u
+}
+
+func formatRoundedQty(qty float64) string {
+	rounded := math.Round(qty*10) / 10
+	return strconv.FormatFloat(rounded, 'f', -1, 64)
 }
 
 func stripKGUnit(v string) string {
