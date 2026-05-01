@@ -169,11 +169,20 @@ func (w bridgePrintRequestWriter) SetPrintRequest(epc string, qty float64, gross
 	})
 }
 
-func (w bridgePrintRequestWriter) ClearPrintRequest() {
+func (w bridgePrintRequestWriter) ClearPrintRequest(epc string) {
 	if w.store == nil {
 		return
 	}
+	want := strings.ToUpper(strings.TrimSpace(epc))
+	if want == "" {
+		return
+	}
+	// Only clear the request if it still belongs to the same EPC.
+	// A canceled batch can finish later and must not erase a newer request.
 	_ = w.store.Update(func(snapshot *bridgestate.Snapshot) {
+		if strings.ToUpper(strings.TrimSpace(snapshot.PrintRequest.EPC)) != want {
+			return
+		}
 		snapshot.PrintRequest = bridgestate.PrintRequestSnapshot{}
 	})
 }

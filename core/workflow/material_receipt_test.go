@@ -512,6 +512,7 @@ type printSetCall struct {
 type stubPrintRequestWriter struct {
 	setCalls   []printSetCall
 	clearCalls int
+	clearEPCs  []string
 }
 
 func (s *stubPrintRequestWriter) SetPrintRequest(epc string, qty float64, grossQty float64, unit string, selection Selection) {
@@ -524,8 +525,9 @@ func (s *stubPrintRequestWriter) SetPrintRequest(epc string, qty float64, grossQ
 	})
 }
 
-func (s *stubPrintRequestWriter) ClearPrintRequest() {
+func (s *stubPrintRequestWriter) ClearPrintRequest(epc string) {
 	s.clearCalls++
+	s.clearEPCs = append(s.clearEPCs, epc)
 }
 
 type stubGenerator struct {

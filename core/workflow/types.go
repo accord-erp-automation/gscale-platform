@@ -143,7 +143,7 @@ type ERP interface {
 
 type PrintRequestWriter interface {
 	SetPrintRequest(epc string, qty float64, grossQty float64, unit string, selection Selection)
-	ClearPrintRequest()
+	ClearPrintRequest(epc string)
 }
 
 type EPCGenerator interface {

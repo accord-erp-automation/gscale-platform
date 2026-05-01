@@ -971,6 +971,43 @@ func TestBridgePrintRequestWriterUsesSelectionPrintMode(t *testing.T) {
 	}
 }
 
+func TestBridgePrintRequestWriterClearPrintRequestKeepsNewerRequest(t *testing.T) {
+	t.Parallel()
+
+	stateFile := t.TempDir() + "/bridge_state.json"
+	store := bridgestate.New(stateFile)
+	if err := store.Update(func(snapshot *bridgestate.Snapshot) {
+		snapshot.PrintRequest = bridgestate.PrintRequestSnapshot{
+			EPC:    "OLD-EPC",
+			Status: "pending",
+		}
+	}); err != nil {
+		t.Fatalf("seed old print request: %v", err)
+	}
+	if err := store.Update(func(snapshot *bridgestate.Snapshot) {
+		snapshot.PrintRequest = bridgestate.PrintRequestSnapshot{
+			EPC:    "NEW-EPC",
+			Status: "pending",
+		}
+	}); err != nil {
+		t.Fatalf("seed new print request: %v", err)
+	}
+
+	writer := bridgePrintRequestWriter{store: store}
+	writer.ClearPrintRequest("OLD-EPC")
+
+	snap, err := store.Read()
+	if err != nil {
+		t.Fatalf("read bridge state: %v", err)
+	}
+	if snap.PrintRequest.EPC != "NEW-EPC" {
+		t.Fatalf("newer print request was cleared: %+v", snap.PrintRequest)
+	}
+	if snap.PrintRequest.Status != "pending" {
+		t.Fatalf("newer print request status changed: %+v", snap.PrintRequest)
+	}
+}
+
 func TestSetupERPStoresValidatedConfig(t *testing.T) {
 	t.Parallel()
 

@@ -168,7 +168,7 @@ func (r *MaterialReceiptRunner) Run(ctx context.Context, selection Selection, ho
 		})
 
 		printResult, err := r.qtyReader.WaitPrintRequestResult(ctx, r.options.PrintResultTimeout, r.options.PrintResultPollInterval, epc)
-		r.printRequests.ClearPrintRequest()
+		r.printRequests.ClearPrintRequest(epc)
 		if isContextError(err) {
 			return nil
 		}
@@ -354,7 +354,7 @@ func (r *MaterialReceiptRunner) PrintOnce(ctx context.Context, selection Selecti
 
 	r.printRequests.SetPrintRequest(epc, draft.Qty, reading.Qty, reading.Unit, selection)
 	printResult, err := r.qtyReader.WaitPrintRequestResult(ctx, r.options.PrintResultTimeout, r.options.PrintResultPollInterval, epc)
-	r.printRequests.ClearPrintRequest()
+	r.printRequests.ClearPrintRequest(epc)
 	if isContextError(err) {
 		return Draft{}, epc, nil
 	}
