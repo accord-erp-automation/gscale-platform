@@ -12,9 +12,9 @@ main `godex` pack-label package.
 - host-side QR rendering
 - host-side Noto Sans text rendering into a monochrome BMP graphic
 - GoDEX graphic download with `~EB` and placement with `Y`
+- archive batch labels that reuse the pack-label layout and only drop the
+  company name, EPC barcode, and pack barcode
 - archive batch labels with item name, brutto, netto, date, and QR history
-- no company name, EPC barcode, or extra pack-label barcode on the archive
-  layout
 
 ## Compatibility Notes
 
@@ -74,23 +74,13 @@ sudo ./godex-g500 \
 
 ## Label Stock
 
-The current production layout is documented for `60 × 80 mm` label paper.
-When you need to match that stock exactly, pass the dimensions explicitly:
+The archive batch layout now defaults to the same `50 × 50 mm` stock as the
+main pack label flow, so the printed content lands on the same coordinate
+system and does not drift into the label seam.
 
-```bash
-GOWORK=off go run ./cmd/godex-g500 \
-  --pack-label \
-  --label-length-mm 80 \
-  --label-width-mm 60 \
-  --company-name Accord \
-  --product-name "Zo'r pista 100gr kok" \
-  --kg 89 \
-  --epc 30A5FEA7709854D93C2B7593
-```
-
-If your printer stock is rotated differently, swap width and length to match
-the physical paper orientation. The engine already supports both values through
-the CLI flags.
+If you need to fine-tune stock for a specific roll, pass `--label-length-mm`
+and `--label-width-mm` explicitly. The engine already supports both values
+through the CLI flags.
 
 ## Notes
 

@@ -3,8 +3,6 @@ package batch
 import (
 	"encoding/base64"
 	"fmt"
-	"image"
-	"image/color"
 	"strings"
 	"time"
 )
@@ -54,40 +52,44 @@ func BuildArchiveBatchLabel(input ArchiveBatchLabel, options LabelOptions) (Arch
 	lineStep := MMDots(5.0, options.DPI)
 	qrBoxDots := MMDots(options.QRBoxMM, options.DPI)
 	qrRightGapDots := MMDots(4.0, options.DPI)
-	qrX := minInt(labelWidthDots-qrBoxDots, maxInt(leftX, labelWidthDots-qrBoxDots-qrRightGapDots))
+	baseQRX := labelWidthDots - qrBoxDots - qrRightGapDots
+	qrX := minInt(labelWidthDots-qrBoxDots, maxInt(leftX, baseQRX))
 
 	productFirstLineWidthDots := maxInt(1, labelWidthDots-leftX)
 	productRestLineWidthDots := maxInt(1, qrX-leftX-MMDots(5.0, options.DPI))
-	itemLines := wrapPrefixedTextPixels(
-		"MAHSULOT NOMI:",
-		itemName,
-		fonts.Bold21,
-		productFirstLineWidthDots,
-		productRestLineWidthDots,
-	)
+	itemLines := wrapPrefixedTextPixels("", itemName, fonts.Bold21, productFirstLineWidthDots, productRestLineWidthDots)
 	if len(itemLines) == 0 {
-		itemLines = []string{"MAHSULOT NOMI:"}
+		itemLines = []string{"-"}
 	}
 
-	itemY := safeMarginDots + lineStep*2
+	companyY := safeMarginDots + lineStep*2
+	itemY := companyY + lineStep
 	qtyY := MMDots(33.0, options.DPI)
-	bruttoY := qtyY + lineStep
-	dateY := maxInt(bruttoY+lineStep, labelLengthDots-safeMarginDots-MMDots(8.0, options.DPI))
 	qrY := maxInt(safeMarginDots+lineStep*2, qtyY+lineStep)
-	qrY = minInt(labelLengthDots-safeMarginDots-qrBoxDots, qrY+MMDots(8.0, options.DPI))
+	qrY = minInt(labelLengthDots-safeMarginDots-MMDots(18.0, options.DPI), qrY+MMDots(8.0, options.DPI))
+	epcY := maxInt(0, safeMarginDots-lineStep*5)
+	textBlockUpDots := MMDots(3.0, options.DPI)
+	headerBlockUpDots := MMDots(5.0, options.DPI)
+	companyY = maxInt(0, companyY-headerBlockUpDots)
+	itemY = maxInt(0, itemY-headerBlockUpDots)
+	qtyY = maxInt(0, qtyY-textBlockUpDots)
+	bruttoY := maxInt(0, qtyY+lineStep)
+	dateY := maxInt(0, epcY+MMDots(3.0, options.DPI))
 
-	textGraphicBytes, err := renderArchiveBatchGraphic(
+	textGraphicBytes, err := renderTextGraphic(
 		labelWidthDots,
 		labelLengthDots,
 		leftX,
+		companyY,
 		itemY,
 		qtyY,
 		bruttoY,
 		dateY,
+		"",
 		itemLines,
-		"DATE: "+batchTime,
 		"NETTO: "+qtyText+" KG",
 		"BRUTTO: "+qtyText+" KG",
+		"DATE: "+batchTime,
 		fonts,
 	)
 	if err != nil {
@@ -151,38 +153,6 @@ func normalizeArchiveOptions(options LabelOptions) LabelOptions {
 		options.BoldFont = defaults.BoldFont
 	}
 	return options
-}
-
-func renderArchiveBatchGraphic(
-	labelWidthDots int,
-	labelLengthDots int,
-	leftX int,
-	itemY int,
-	qtyY int,
-	bruttoY int,
-	dateY int,
-	itemLines []string,
-	dateText string,
-	nettoText string,
-	bruttoText string,
-	fonts *FontSet,
-) ([]byte, error) {
-	canvas := image.NewRGBA(image.Rect(0, 0, labelWidthDots, labelLengthDots))
-	for y := 0; y < canvas.Bounds().Dy(); y++ {
-		for x := 0; x < canvas.Bounds().Dx(); x++ {
-			canvas.SetRGBA(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
-		}
-	}
-
-	for idx, line := range itemLines {
-		drawTextTop(canvas, leftX, itemY+idx*28, fonts.Bold21, line)
-	}
-	drawTextTop(canvas, leftX, qtyY, fonts.Regular26, nettoText)
-	drawTextTop(canvas, leftX, bruttoY, fonts.Regular26, bruttoText)
-	drawTextTop(canvas, leftX, dateY, fonts.Regular20, dateText)
-
-	cropped := cropInk(canvas)
-	return EncodeMonoBMP(cropped)
 }
 
 func FormatArchiveBatchTime(raw string) string {

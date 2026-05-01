@@ -127,8 +127,8 @@ func TestBuildArchiveBatchLabelContainsQRAndText(t *testing.T) {
 	}
 	joined := strings.Join(data.Commands, "\n")
 	for _, want := range []string{
-		"^Q80,3",
-		"^W60",
+		"^Q50,3",
+		"^W50",
 		"Y0,0,TEXTLBL",
 		"QRLBL",
 		"E",

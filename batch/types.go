@@ -66,9 +66,9 @@ func DefaultSimpleLabelOptions() LabelOptions {
 
 func DefaultArchiveLabelOptions() LabelOptions {
 	return LabelOptions{
-		LabelLengthMM: 80,
+		LabelLengthMM: 50,
 		LabelGapMM:    3,
-		LabelWidthMM:  60,
+		LabelWidthMM:  50,
 		DPI:           203,
 		SafeMarginMM:  4.0,
 		QRBoxMM:       18.0,
