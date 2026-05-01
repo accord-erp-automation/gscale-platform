@@ -499,10 +499,16 @@ func (s *Server) readMonitorPayload(r *http.Request) (map[string]any, error) {
 	}
 
 	printer := map[string]any{
-		"ok": false,
+		"ok":           snap.Printer.Connected,
+		"connected":    snap.Printer.Connected,
+		"kind":         snap.Printer.Kind,
+		"label":        snap.Printer.Label,
+		"device_paths": append([]string(nil), snap.Printer.DevicePaths...),
+		"error":        snap.Printer.Error,
+		"updated_at":   snap.Printer.UpdatedAt,
 	}
-	if value, err := s.fetchPrinterTrace(); err == nil {
-		printer = value
+	if strings.TrimSpace(snap.Printer.Label) == "" {
+		printer["label"] = "ulanmagan"
 	}
 
 	return map[string]any{
@@ -511,29 +517,6 @@ func (s *Server) readMonitorPayload(r *http.Request) (map[string]any, error) {
 		"state":   snap,
 		"printer": printer,
 	}, nil
-}
-
-func (s *Server) fetchPrinterTrace() (map[string]any, error) {
-	base := strings.TrimRight(strings.TrimSpace(s.cfg.PolygonURL), "/")
-	if base == "" {
-		return nil, fmt.Errorf("polygon url empty")
-	}
-
-	resp, err := s.http.Get(base + "/api/v1/dev/printer")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("polygon printer status=%d", resp.StatusCode)
-	}
-
-	var out map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {

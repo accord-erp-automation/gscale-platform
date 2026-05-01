@@ -3,6 +3,7 @@ package state
 type Snapshot struct {
 	Scale        ScaleSnapshot        `json:"scale"`
 	Zebra        ZebraSnapshot        `json:"zebra"`
+	Printer      PrinterSnapshot      `json:"printer"`
 	Batch        BatchSnapshot        `json:"batch"`
 	PrintRequest PrintRequestSnapshot `json:"print_request"`
 	UpdatedAt    string               `json:"updated_at,omitempty"`
@@ -31,6 +32,15 @@ type ZebraSnapshot struct {
 	Action      string `json:"action,omitempty"`
 	Error       string `json:"error,omitempty"`
 	UpdatedAt   string `json:"updated_at,omitempty"`
+}
+
+type PrinterSnapshot struct {
+	Connected   bool     `json:"connected"`
+	Kind        string   `json:"kind,omitempty"`
+	Label       string   `json:"label,omitempty"`
+	DevicePaths []string `json:"device_paths,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	UpdatedAt   string   `json:"updated_at,omitempty"`
 }
 
 type BatchSnapshot struct {

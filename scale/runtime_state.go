@@ -19,6 +19,8 @@ type runtimeState struct {
 	bridgeStore           *bridgestate.Store
 	batchState            *batchStateReader
 	printRequest          *printRequestReader
+	printer               bridgestate.PrinterSnapshot
+	printerRefreshAt      time.Time
 	batchActive           bool
 	message               string
 	info                  string
@@ -41,11 +43,15 @@ func newRuntimeState(ctx context.Context, updates <-chan Reading, zebraUpdates <
 		bridgeStore:    bridgestate.New(bridgeStateFile),
 		batchState:     newBatchStateReader(bridgeStateFile, autoWhenNoBatch),
 		printRequest:   newPrintRequestReader(bridgeStateFile),
-		batchActive:    true,
-		last:           Reading{Unit: "kg"},
-		message:        "scale oqimi kutilmoqda",
-		info:           "ready",
-		now:            time.Now(),
+		printer: bridgestate.PrinterSnapshot{
+			Connected: false,
+			Label:     "ulanmagan",
+		},
+		batchActive: true,
+		last:        Reading{Unit: "kg"},
+		message:     "scale oqimi kutilmoqda",
+		info:        "ready",
+		now:         time.Now(),
 		zebra: ZebraStatus{
 			Connected: false,
 			Verify:    "-",
@@ -94,7 +100,7 @@ func (rs *runtimeState) applyReading(upd Reading) {
 	}
 
 	rs.last = upd
-	if err := writeBridgeStateSnapshot(rs.bridgeStore, upd, rs.zebra); err != nil {
+	if err := writeBridgeStateSnapshot(rs.bridgeStore, upd, rs.zebra, rs.printer); err != nil {
 		rs.info = "bridge snapshot xato: " + err.Error()
 	}
 	if upd.Error != "" {
@@ -110,7 +116,7 @@ func (rs *runtimeState) applyZebra(st ZebraStatus) {
 	}
 	st = mergeZebraStatus(rs.zebra, st)
 	rs.zebra = st
-	if err := writeBridgeStateSnapshot(rs.bridgeStore, rs.last, rs.zebra); err != nil {
+	if err := writeBridgeStateSnapshot(rs.bridgeStore, rs.last, rs.zebra, rs.printer); err != nil {
 		rs.info = "bridge snapshot xato: " + err.Error()
 	}
 	if rs.activePrintRequestEPC != "" && strings.EqualFold(strings.TrimSpace(st.Action), "encode") {
@@ -130,6 +136,36 @@ func (rs *runtimeState) applyZebra(st ZebraStatus) {
 	}
 	if st.Error != "" && st.Action != "" {
 		rs.info = zebraActionSummary(st)
+	}
+}
+
+func (rs *runtimeState) refreshPrinterSnapshot(now time.Time) {
+	if rs == nil || rs.bridgeStore == nil {
+		return
+	}
+	if !rs.printerRefreshAt.IsZero() && now.Sub(rs.printerRefreshAt) < 2*time.Second {
+		return
+	}
+
+	snap, err := detectPrinterSnapshot()
+	if err != nil {
+		snap = bridgestate.PrinterSnapshot{
+			Connected: false,
+			Label:     "ulanmagan",
+			Error:     err.Error(),
+		}
+	}
+	if strings.TrimSpace(snap.Label) == "" {
+		snap.Label = "ulanmagan"
+	}
+	if snap.UpdatedAt == "" {
+		snap.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
+	}
+
+	rs.printer = snap
+	rs.printerRefreshAt = now
+	if err := writeBridgeStateSnapshot(rs.bridgeStore, rs.last, rs.zebra, rs.printer); err != nil {
+		rs.info = "bridge snapshot xato: " + err.Error()
 	}
 }
 

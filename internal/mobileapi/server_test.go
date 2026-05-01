@@ -116,6 +116,12 @@ func TestMonitorStateReturnsBridgeSnapshot(t *testing.T) {
 			Stable:    &stable,
 			UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		}
+		snapshot.Printer = bridgestate.PrinterSnapshot{
+			Connected: true,
+			Kind:      "godex",
+			Label:     "godex: ulangan",
+			UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}
 	}); err != nil {
 		t.Fatalf("seed bridge: %v", err)
 	}
@@ -153,6 +159,9 @@ func TestMonitorStateReturnsBridgeSnapshot(t *testing.T) {
 		t.Fatalf("monitor status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"source":"polygon"`)) {
+		t.Fatalf("monitor body = %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"label":"godex: ulangan"`)) {
 		t.Fatalf("monitor body = %s", rec.Body.String())
 	}
 }
