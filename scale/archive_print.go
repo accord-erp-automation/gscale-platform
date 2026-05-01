@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"godex"
+	"batch"
 )
 
 type archivePrintRequestReader struct {
@@ -114,7 +114,7 @@ func (rs *runtimeState) processPendingArchivePrintRequest(now time.Time) {
 	if itemLabel == "" {
 		itemLabel = strings.TrimSpace(req.ItemCode)
 	}
-	qtyText := godex.FormatArchiveBatchQty(req.TotalQty)
+	qtyText := batch.FormatArchiveBatchQty(req.TotalQty)
 	printer := resolvePrintBackend(req.Printer, rs.printBackend)
 	if !rs.printBackendEnabled(printer) {
 		errText := printer + " disabled"
@@ -146,7 +146,7 @@ func (rs *runtimeState) processPendingArchivePrintRequest(now time.Time) {
 	startedAt := time.Now()
 	var err error
 	if printer == printBackendGoDEX {
-		err = runGoDEXArchiveBatchLabel(req, 5*time.Second)
+		err = runBatchArchiveBatchLabel(req, 5*time.Second)
 	} else {
 		err = runZebraArchiveBatchLabel(rs.zebraPreferred, req, 1400*time.Millisecond)
 	}
@@ -172,14 +172,14 @@ func (rs *runtimeState) processPendingArchivePrintRequest(now time.Time) {
 	}
 }
 
-func runGoDEXArchiveBatchLabel(req bridgestate.ArchivePrintRequestSnapshot, timeout time.Duration) error {
-	lg := workerLog("worker.godex_action")
-	lg.Printf("archive label start: session=%s item=%s qty=%s time=%s timeout=%s", req.SessionID, strings.TrimSpace(req.ItemName), godex.FormatArchiveBatchQty(req.TotalQty), godex.FormatArchiveBatchTime(req.BatchTime), timeout)
+func runBatchArchiveBatchLabel(req bridgestate.ArchivePrintRequestSnapshot, timeout time.Duration) error {
+	lg := workerLog("worker.batch_action")
+	lg.Printf("archive label start: session=%s item=%s qty=%s time=%s timeout=%s", req.SessionID, strings.TrimSpace(req.ItemName), batch.FormatArchiveBatchQty(req.TotalQty), batch.FormatArchiveBatchTime(req.BatchTime), timeout)
 
 	godexIOMutex.Lock()
 	defer godexIOMutex.Unlock()
 
-	printer, err := godex.OpenG500()
+	printer, err := batch.OpenG500()
 	if err != nil {
 		return err
 	}
@@ -197,23 +197,23 @@ func runGoDEXArchiveBatchLabel(req bridgestate.ArchivePrintRequestSnapshot, time
 		}
 	}
 
-	_, err = printer.PrintArchiveBatch(godex.ArchiveBatchLabel{
+	_, err = printer.PrintArchiveBatch(batch.ArchiveBatchLabel{
 		SessionID: req.SessionID,
 		ItemName:  req.ItemName,
-		QtyText:   godex.FormatArchiveBatchQty(req.TotalQty),
-		BatchTime: godex.FormatArchiveBatchTime(req.BatchTime),
-	}, godex.DefaultArchiveLabelOptions())
+		QtyText:   batch.FormatArchiveBatchQty(req.TotalQty),
+		BatchTime: batch.FormatArchiveBatchTime(req.BatchTime),
+	}, batch.DefaultArchiveLabelOptions())
 	if err != nil {
 		return err
 	}
 
-	lg.Printf("archive label done: session=%s item=%s qty=%s", req.SessionID, strings.TrimSpace(req.ItemName), godex.FormatArchiveBatchQty(req.TotalQty))
+	lg.Printf("archive label done: session=%s item=%s qty=%s", req.SessionID, strings.TrimSpace(req.ItemName), batch.FormatArchiveBatchQty(req.TotalQty))
 	return nil
 }
 
 func runZebraArchiveBatchLabel(preferredDevice string, req bridgestate.ArchivePrintRequestSnapshot, timeout time.Duration) error {
 	lg := workerLog("worker.zebra_action")
-	lg.Printf("archive label start: preferred_device=%s session=%s item=%s qty=%s time=%s timeout=%s", preferredDevice, req.SessionID, strings.TrimSpace(req.ItemName), godex.FormatArchiveBatchQty(req.TotalQty), godex.FormatArchiveBatchTime(req.BatchTime), timeout)
+	lg.Printf("archive label start: preferred_device=%s session=%s item=%s qty=%s time=%s timeout=%s", preferredDevice, req.SessionID, strings.TrimSpace(req.ItemName), batch.FormatArchiveBatchQty(req.TotalQty), batch.FormatArchiveBatchTime(req.BatchTime), timeout)
 
 	zebraIOMutex.Lock()
 	defer zebraIOMutex.Unlock()
@@ -231,7 +231,7 @@ func runZebraArchiveBatchLabel(preferredDevice string, req bridgestate.ArchivePr
 		return err
 	}
 	waitReady(p.DevicePath, 1600*time.Millisecond)
-	lg.Printf("archive label done: device=%s session=%s item=%s qty=%s", p.DevicePath, req.SessionID, strings.TrimSpace(req.ItemName), godex.FormatArchiveBatchQty(req.TotalQty))
+	lg.Printf("archive label done: device=%s session=%s item=%s qty=%s", p.DevicePath, req.SessionID, strings.TrimSpace(req.ItemName), batch.FormatArchiveBatchQty(req.TotalQty))
 	return nil
 }
 
@@ -243,15 +243,15 @@ func buildArchiveBatchZPL(req bridgestate.ArchivePrintRequestSnapshot) (string, 
 	if item == "" {
 		item = "-"
 	}
-	qtyText := sanitizeZPLText(godex.FormatArchiveBatchQty(req.TotalQty))
+	qtyText := sanitizeZPLText(batch.FormatArchiveBatchQty(req.TotalQty))
 	if qtyText == "" {
 		qtyText = "0"
 	}
-	batchTime := sanitizeZPLText(godex.FormatArchiveBatchTime(req.BatchTime))
+	batchTime := sanitizeZPLText(batch.FormatArchiveBatchTime(req.BatchTime))
 	if batchTime == "" {
 		batchTime = "-"
 	}
-	qrPayload := sanitizeZPLText(godex.EncodeArchiveBatchPayload(req.SessionID, item, qtyText, batchTime))
+	qrPayload := sanitizeZPLText(batch.EncodeArchiveBatchPayload(req.SessionID, item, qtyText, batchTime))
 	if qrPayload == "" {
 		return "", fmt.Errorf("archive qr payload bo'sh")
 	}

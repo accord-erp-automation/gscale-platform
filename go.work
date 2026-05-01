@@ -4,6 +4,7 @@ use (
 	.
 	./bridge
 	./core
+	./batch
 	./godex
 	./polygon
 	./scale
